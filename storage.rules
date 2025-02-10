@@ -1,0 +1,58 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // ユーザーが認証済みかどうかをチェック
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // リクエストしているユーザーが対象のユーザーと同じかチェック
+    function isUser(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // プロフィール画像のパス
+    match /users/{userId}/profile/{imageId} {
+      // 読み取り:認証済みユーザーのみ
+      allow read: if isAuthenticated();
+
+      // 作成・更新:自分の画像のみ
+      allow create, update: if isAuthenticated() && isUser(userId) &&
+        // 画像ファイルのみを許可
+        request.resource.contentType.matches('image/.*') &&
+        // ファイルサイズを5MB以下に制限
+        request.resource.size <= 5 * 1024 * 1024;
+
+      // 削除:自分の画像のみ
+      allow delete: if isAuthenticated() && isUser(userId);
+    }
+
+    // グループ画像のパス
+    match /groups/{groupId}/images/{imageId} {
+      // グループのメンバーかどうかをチェック
+      function isGroupMember() {
+        return isAuthenticated() &&
+          exists(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid));
+      }
+
+      // 読み取り:グループメンバーのみ
+      allow read: if isGroupMember();
+
+      // 作成・更新:グループメンバーのみ
+      allow create, update: if isGroupMember() &&
+        // 画像ファイルのみを許可
+        request.resource.contentType.matches('image/.*') &&
+        // ファイルサイズを5MB以下に制限
+        request.resource.size <= 5 * 1024 * 1024;
+
+      // 削除:グループ管理者のみ
+      allow delete: if isAuthenticated() &&
+        get(/databases/(default)/documents/groups/$(groupId)).data.createdBy == request.auth.uid;
+    }
+
+    // その他のパスは全てアクセス拒否
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

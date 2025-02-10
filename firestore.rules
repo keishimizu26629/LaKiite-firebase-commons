@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ユーザーが認証済みかどうかをチェック
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // リクエストしているユーザーが対象のユーザーと同じかチェック
+    function isUser(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // グループのメンバーかどうかをチェック
+    function isGroupMember(groupId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    // usersコレクションのルール
+    match /users/{userId} {
+      // 作成:ユーザーが認証済みで、かつドキュメントIDが自分のuidと一致する場合
+      allow create: if isAuthenticated() && isUser(userId);
+
+      // 読み取り:認証済みユーザーのみ
+      allow read: if isAuthenticated();
+
+      // 更新:自分のドキュメントのみ
+      allow update: if isAuthenticated() && isUser(userId);
+
+      // 削除:自分のドキュメントのみ
+      allow delete: if isAuthenticated() && isUser(userId);
+    }
+
+    // groupsコレクションのルール
+    match /groups/{groupId} {
+      // 作成:認証済みユーザーのみ
+      allow create: if isAuthenticated();
+
+      // 読み取り:グループメンバーのみ
+      allow read: if isGroupMember(groupId);
+
+      // 更新:グループメンバーのみ
+      allow update: if isGroupMember(groupId);
+
+      // 削除:グループ作成者のみ
+      allow delete: if isAuthenticated() &&
+        get(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid;
+
+      // グループメンバーのサブコレクション
+      match /members/{memberId} {
+        allow read: if isGroupMember(groupId);
+        allow write: if isGroupMember(groupId);
+      }
+    }
+
+    // schedulesコレクションのルール
+    match /schedules/{scheduleId} {
+      // スケジュールが属するグループのメンバーかチェック
+      function isScheduleGroupMember() {
+        let schedule = get(/databases/$(database)/documents/schedules/$(scheduleId)).data;
+        return isGroupMember(schedule.groupId);
+      }
+
+      // 作成:グループメンバーのみ
+      allow create: if isAuthenticated() &&
+        isGroupMember(request.resource.data.groupId);
+
+      // 読み取り:グループメンバーのみ
+      allow read: if isAuthenticated() && isScheduleGroupMember();
+
+      // 更新:グループメンバーのみ
+      allow update: if isAuthenticated() && isScheduleGroupMember();
+
+      // 削除:スケジュール作成者またはグループ管理者のみ
+      allow delete: if isAuthenticated() && (
+        get(/databases/$(database)/documents/schedules/$(scheduleId)).data.createdBy == request.auth.uid ||
+        get(/databases/$(database)/documents/groups/$(get(/databases/$(database)/documents/schedules/$(scheduleId)).data.groupId)).data.createdBy == request.auth.uid
+      );
+    }
+  }
+}

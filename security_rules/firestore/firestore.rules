@@ -1,0 +1,60 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // searchIdが有効なフォーマットかを確認する関数
+    function isValidSearchId(searchId) {
+      return searchId.matches('^[a-zA-Z0-9]{8}$');
+    }
+
+    // 必須フィールドが存在することを確認する関数
+    function hasRequiredFields(data) {
+      return data.name != null
+        && data.displayName != null
+        && data.searchId != null
+        && data.friends != null
+        && data.groups != null;
+    }
+
+    // usersコレクションのルール
+    match /users/{userId} {
+      // 作成:ユーザーが認証済みで、かつドキュメントIDが自分のuidと一致する場合
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && hasRequiredFields(request.resource.data)
+        && isValidSearchId(request.resource.data.searchId);
+
+      // 読み取り:認証済みユーザーのみ
+      allow read: if request.auth != null;
+
+      // 更新:自分のドキュメントのみ
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && hasRequiredFields(request.resource.data)
+        && isValidSearchId(request.resource.data.searchId);
+
+      // 削除:自分のドキュメントのみ
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // groupsコレクションのルール
+    match /groups/{groupId} {
+      // 読み取り:認証済みユーザーのみ
+      allow read: if request.auth != null;
+
+      // 作成:認証済みユーザーのみ(作成者は自動的にownerになる)
+      allow create: if request.auth != null &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.memberIds.hasAll([request.auth.uid]);
+
+      // 更新:グループのオーナーまたはメンバーのみ
+      allow update: if request.auth != null &&
+        (resource.data.ownerId == request.auth.uid ||
+         resource.data.memberIds.hasAny([request.auth.uid]));
+
+      // 削除:グループのオーナーのみ
+      allow delete: if request.auth != null &&
+        resource.data.ownerId == request.auth.uid;
+    }
+  }
+}
