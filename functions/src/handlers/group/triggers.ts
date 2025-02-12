@@ -20,10 +20,14 @@ export const onGroupCreated = onDocumentCreated({
   const creatorId = groupData.ownerId;
 
   try {
-    // ユーザードキュメントのgroupsフィールドを更新
-    await db.collection("users").doc(creatorId).update({
-      groups: admin.firestore.FieldValue.arrayUnion(groupId)
-    });
+    // ユーザーのprivateコレクション内のgroupsフィールドを更新
+    await db.collection("users")
+      .doc(creatorId)
+      .collection("private")
+      .doc("profile")
+      .update({
+        groups: admin.firestore.FieldValue.arrayUnion(groupId)
+      });
 
     console.log(`Successfully added group ${groupId} to user ${creatorId}"s groups list`);
   } catch (error) {
