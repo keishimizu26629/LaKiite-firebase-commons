@@ -7,34 +7,49 @@ service cloud.firestore {
       return searchId.matches('^[a-zA-Z0-9]{8}$');
     }
 
-    // 必須フィールドが存在することを確認する関数
-    function hasRequiredFields(data) {
+    // 公開プロフィールの必須フィールドを確認する関数
+    function hasRequiredPublicFields(data) {
+      return data.displayName != null
+        && data.searchId is string
+        && isValidSearchId(data.searchId);
+    }
+
+    // 非公開プロフィールの必須フィールドを確認する関数
+    function hasRequiredPrivateFields(data) {
       return data.name != null
-        && data.displayName != null
-        && data.searchId != null
         && data.friends != null
-        && data.groups != null;
+        && data.groups != null
+        && data.createdAt != null;
     }
 
     // usersコレクションのルール
     match /users/{userId} {
-      // 作成:ユーザーが認証済みで、かつドキュメントIDが自分のuidと一致する場合
-      allow create: if request.auth != null
-        && request.auth.uid == userId
-        && hasRequiredFields(request.resource.data)
-        && isValidSearchId(request.resource.data.searchId);
-
-      // 読み取り:認証済みユーザーのみ
+      // 公開情報の読み取りと検索クエリを許可
       allow read: if request.auth != null;
+      allow list: if request.auth != null
+        && request.query.limit <= 1
+        && request.query.filters.size() == 1
+        && request.query.filters[0].op == "=="
+        && request.query.filters[0].field == "searchId";
 
-      // 更新:自分のドキュメントのみ
-      allow update: if request.auth != null
+      // 本人のみ書き込み可能
+      allow create, update: if request.auth != null
         && request.auth.uid == userId
-        && hasRequiredFields(request.resource.data)
-        && isValidSearchId(request.resource.data.searchId);
+        && hasRequiredPublicFields(request.resource.data);
 
-      // 削除:自分のドキュメントのみ
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null
+        && request.auth.uid == userId;
+
+      // Private Subcollection Rules
+      match /private/{docId} {
+        // 読み書きは本人のみ
+        allow read, write: if request.auth != null
+          && request.auth.uid == userId;
+
+        allow create, update: if request.auth != null
+          && request.auth.uid == userId
+          && hasRequiredPrivateFields(request.resource.data);
+      }
     }
 
     // groupsコレクションのルール
