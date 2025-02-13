@@ -26,11 +26,19 @@ service cloud.firestore {
     match /users/{userId} {
       // 公開情報の読み取りと検索クエリを許可
       allow read: if request.auth != null;
-      allow list: if request.auth != null
-        && request.query.limit <= 1
-        && request.query.filters.size() == 1
-        && request.query.filters[0].op == "=="
-        && request.query.filters[0].field == "searchId";
+      allow list: if request.auth != null && (
+        // searchIdによる検索
+        (
+          request.query.limit <= 1
+          && request.query.filters.size() == 1
+          && request.query.filters[0].op == "=="
+          && request.query.filters[0].field == "searchId"
+        )
+        // または、ドキュメントIDによる直接取得
+        || (
+          request.query.filters == null
+        )
+      );
 
       // 本人のみ書き込み可能
       allow create, update: if request.auth != null
@@ -70,6 +78,77 @@ service cloud.firestore {
       // 削除:グループのオーナーのみ
       allow delete: if request.auth != null &&
         resource.data.ownerId == request.auth.uid;
+    }
+
+    // friendRequestsコレクションのルール
+    match /friendRequests/{requestId} {
+      // 必須フィールドの検証関数
+      function hasRequiredFields(data) {
+        return data.sendUserId is string
+          && data.receiveUserId is string
+          && data.status in ['pending', 'accepted', 'rejected']
+          && data.createdAt is timestamp
+          && data.updatedAt is timestamp
+          && data.rejectionCount is number
+          && data.isRead is bool;
+      }
+
+      // 参加者かどうかを確認する関数
+      function isParticipant() {
+        return request.auth != null
+          && (
+            resource.data.sendUserId == request.auth.uid
+            || resource.data.receiveUserId == request.auth.uid
+          );
+      }
+
+      // 作成:認証済みユーザーのみ(送信者として)
+      allow create: if request.auth != null
+        && request.resource.data.sendUserId == request.auth.uid
+        && hasRequiredFields(request.resource.data)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.rejectionCount == 0
+        && request.resource.data.isRead == false;
+
+      // 読み取り:送信者または受信者のみ
+      allow read: if request.auth != null;
+
+      // リスト:認証済みユーザーのみ、かつクエリ条件が正しい場合
+      allow list: if request.auth != null
+        && (
+          // フィルターなしの場合
+          request.query.filters == null
+          || (
+            // receiveUserIdとstatusでのフィルタリング
+            request.query.filters.size() <= 2
+            && (
+              // receiveUserIdフィルターのみ
+              (
+                request.query.filters.size() == 1
+                && request.query.filters[0].field == 'receiveUserId'
+                && request.query.filters[0].op == '=='
+                && request.query.filters[0].value == request.auth.uid
+              )
+              || (
+                // receiveUserIdとstatusフィルター
+                request.query.filters.size() == 2
+                && request.query.filters[0].field == 'receiveUserId'
+                && request.query.filters[0].op == '=='
+                && request.query.filters[0].value == request.auth.uid
+                && request.query.filters[1].field == 'status'
+                && request.query.filters[1].op == '=='
+                && request.query.filters[1].value == 'pending'
+              )
+            )
+          )
+        );
+
+      // 更新:送信者または受信者のみ
+      allow update: if request.auth != null
+        && isParticipant()
+        && hasRequiredFields(request.resource.data)
+        && request.resource.data.sendUserId == resource.data.sendUserId
+        && request.resource.data.receiveUserId == resource.data.receiveUserId;
     }
   }
 }
