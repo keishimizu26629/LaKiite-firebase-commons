@@ -5,3 +5,6 @@ admin.initializeApp();
 
 // グループ関連のトリガーをエクスポート
 export * from "./handlers/group/triggers";
+
+// 通知関連のトリガーをエクスポート
+export * from "./handlers/notification/triggers";

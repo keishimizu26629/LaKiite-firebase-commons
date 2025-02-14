@@ -22,6 +22,12 @@ service cloud.firestore {
         && data.createdAt != null;
     }
 
+    // ユーザーが友達かどうかを確認する関数
+    function isFriend(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/private/profile)
+        && get(/databases/$(database)/documents/users/$(userId)/private/profile).data.friends.hasAny([request.auth.uid]);
+    }
+
     // usersコレクションのルール
     match /users/{userId} {
       // 公開情報の読み取りと検索クエリを許可
@@ -50,8 +56,13 @@ service cloud.firestore {
 
       // Private Subcollection Rules
       match /private/{docId} {
-        // 読み書きは本人のみ
-        allow read, write: if request.auth != null
+        // 読み取り: 本人または友達のみ
+        allow read: if request.auth != null && (
+          request.auth.uid == userId || isFriend(userId)
+        );
+
+        // 書き込み: 本人のみ
+        allow write: if request.auth != null
           && request.auth.uid == userId;
 
         allow create, update: if request.auth != null
@@ -80,17 +91,24 @@ service cloud.firestore {
         resource.data.ownerId == request.auth.uid;
     }
 
-    // friendRequestsコレクションのルール
-    match /friendRequests/{requestId} {
+    // notificationsコレクションのルール
+    match /notifications/{notificationId} {
       // 必須フィールドの検証関数
       function hasRequiredFields(data) {
-        return data.sendUserId is string
+        return data.type in ['friend', 'groupInvitation']
+          && data.sendUserId is string
           && data.receiveUserId is string
           && data.status in ['pending', 'accepted', 'rejected']
           && data.createdAt is timestamp
           && data.updatedAt is timestamp
           && data.rejectionCount is number
-          && data.isRead is bool;
+          && data.isRead is bool
+          && (
+            // グループ招待の場合はgroupIdが必須
+            data.type == 'groupInvitation'
+              ? (data.groupId is string)
+              : true
+          );
       }
 
       // 参加者かどうかを確認する関数
@@ -111,7 +129,10 @@ service cloud.firestore {
         && request.resource.data.isRead == false;
 
       // 読み取り:送信者または受信者のみ
-      allow read: if request.auth != null;
+      allow read: if request.auth != null && (
+        resource.data.sendUserId == request.auth.uid
+        || resource.data.receiveUserId == request.auth.uid
+      );
 
       // リスト:認証済みユーザーのみ、かつクエリ条件が正しい場合
       allow list: if request.auth != null
@@ -119,8 +140,8 @@ service cloud.firestore {
           // フィルターなしの場合
           request.query.filters == null
           || (
-            // receiveUserIdとstatusでのフィルタリング
-            request.query.filters.size() <= 2
+            // receiveUserIdとstatusとtypeとisReadでのフィルタリング
+            request.query.filters.size() <= 4
             && (
               // receiveUserIdフィルターのみ
               (
@@ -137,7 +158,26 @@ service cloud.firestore {
                 && request.query.filters[0].value == request.auth.uid
                 && request.query.filters[1].field == 'status'
                 && request.query.filters[1].op == '=='
-                && request.query.filters[1].value == 'pending'
+              )
+              || (
+                // receiveUserIdとstatusとtypeフィルター
+                request.query.filters.size() == 3
+                && request.query.filters[0].field == 'receiveUserId'
+                && request.query.filters[0].op == '=='
+                && request.query.filters[0].value == request.auth.uid
+                && request.query.filters[1].field == 'status'
+                && request.query.filters[1].op == '=='
+                && request.query.filters[2].field == 'type'
+                && request.query.filters[2].op == '=='
+              )
+              || (
+                // receiveUserIdとisReadフィルター
+                request.query.filters.size() == 2
+                && request.query.filters[0].field == 'receiveUserId'
+                && request.query.filters[0].op == '=='
+                && request.query.filters[0].value == request.auth.uid
+                && request.query.filters[1].field == 'isRead'
+                && request.query.filters[1].op == '=='
               )
             )
           )
@@ -148,7 +188,14 @@ service cloud.firestore {
         && isParticipant()
         && hasRequiredFields(request.resource.data)
         && request.resource.data.sendUserId == resource.data.sendUserId
-        && request.resource.data.receiveUserId == resource.data.receiveUserId;
+        && request.resource.data.receiveUserId == resource.data.receiveUserId
+        && request.resource.data.type == resource.data.type
+        && (
+          // グループ招待の場合はgroupIdの変更を禁止
+          request.resource.data.type == 'groupInvitation'
+            ? (request.resource.data.groupId == resource.data.groupId)
+            : true
+        );
     }
   }
 }
