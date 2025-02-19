@@ -28,6 +28,33 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(userId)/private/profile).data.friends.hasAny([request.auth.uid]);
     }
 
+    // スケジュールの必須フィールドを確認する関数
+    function hasRequiredScheduleFields(data) {
+      return data.title is string
+        && data.description is string
+        && data.startDateTime is timestamp
+        && data.endDateTime is timestamp
+        && data.ownerId is string
+        && data.sharedLists is list
+        && data.visibleTo is list;
+    }
+
+    // ユーザーがスケジュールにアクセス可能かを確認する関数
+    function canAccessSchedule(scheduleData) {
+      return request.auth != null && (
+        scheduleData.ownerId == request.auth.uid ||
+        scheduleData.visibleTo.hasAny([request.auth.uid])
+      );
+    }
+
+    // ユーザーがリストにアクセス可能かを確認する関数
+    function canAccessList(listData) {
+      return request.auth != null && (
+        listData.ownerId == request.auth.uid ||
+        listData.memberIds.hasAny([request.auth.uid])
+      );
+    }
+
     // usersコレクションのルール
     match /users/{userId} {
       // 公開情報の読み取りと検索クエリを許可
@@ -71,6 +98,24 @@ service cloud.firestore {
       }
     }
 
+    // listsコレクションのルール
+    match /lists/{listId} {
+      // 読み取り: リストの所有者またはメンバーのみ
+      allow read: if request.auth != null && canAccessList(resource.data);
+
+      // 作成: 認証済みユーザーのみ
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.memberIds.hasAll([request.auth.uid]);
+
+      // 更新: リストの所有者またはメンバーのみ
+      allow update: if request.auth != null && canAccessList(resource.data);
+
+      // 削除: リストの所有者のみ
+      allow delete: if request.auth != null
+        && resource.data.ownerId == request.auth.uid;
+    }
+
     // groupsコレクションのルール
     match /groups/{groupId} {
       // 読み取り:認証済みユーザーのみ
@@ -89,6 +134,60 @@ service cloud.firestore {
       // 削除:グループのオーナーのみ
       allow delete: if request.auth != null &&
         resource.data.ownerId == request.auth.uid;
+    }
+
+    // schedulesコレクションのルール
+    match /schedules/{scheduleId} {
+      // 読み取り: スケジュールの所有者またはvisibleToに含まれるユーザーのみ
+      allow read: if request.auth != null && canAccessSchedule(resource.data);
+
+      // 作成: 認証済みユーザーのみ
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid
+        && hasRequiredScheduleFields(request.resource.data)
+        // 共有リストへのアクセス権限を確認
+        && request.resource.data.sharedLists.size() == 0 || (
+          request.resource.data.sharedLists.size() > 0 &&
+          getAfter(/databases/$(database)/documents/lists/$(request.resource.data.sharedLists[0])).data.memberIds.hasAny([request.auth.uid])
+        );
+
+      // 更新: スケジュールの所有者のみ
+      allow update: if request.auth != null
+        && resource.data.ownerId == request.auth.uid
+        && hasRequiredScheduleFields(request.resource.data);
+
+      // 削除: スケジュールの所有者のみ
+      allow delete: if request.auth != null
+        && resource.data.ownerId == request.auth.uid;
+
+      // reactionsサブコレクションのルール
+      match /reactions/{reactionId} {
+        // 読み取り: スケジュールにアクセス可能なユーザーのみ
+        allow read: if request.auth != null && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data);
+
+        // 作成・更新: スケジュールにアクセス可能なユーザーのみ、かつreactionIdは自分のユーザーIDと一致
+        allow create, update: if request.auth != null
+          && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data)
+          && reactionId == request.auth.uid
+          && request.resource.data.userId == request.auth.uid;
+
+        // 削除: 自分のリアクションのみ
+        allow delete: if request.auth != null && reactionId == request.auth.uid;
+      }
+
+      // commentsサブコレクションのルール
+      match /comments/{commentId} {
+        // 読み取り: スケジュールにアクセス可能なユーザーのみ
+        allow read: if request.auth != null && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data);
+
+        // 作成: スケジュールにアクセス可能なユーザーのみ
+        allow create: if request.auth != null
+          && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data)
+          && request.resource.data.userId == request.auth.uid;
+
+        // 削除: 自分のコメントのみ
+        allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      }
     }
 
     // notificationsコレクションのルール
@@ -147,37 +246,37 @@ service cloud.firestore {
               (
                 request.query.filters.size() == 1
                 && request.query.filters[0].field == 'receiveUserId'
-                && request.query.filters[0].op == '=='
+                && request.query.filters[0].op == "=="
                 && request.query.filters[0].value == request.auth.uid
               )
               || (
                 // receiveUserIdとstatusフィルター
                 request.query.filters.size() == 2
                 && request.query.filters[0].field == 'receiveUserId'
-                && request.query.filters[0].op == '=='
+                && request.query.filters[0].op == "=="
                 && request.query.filters[0].value == request.auth.uid
                 && request.query.filters[1].field == 'status'
-                && request.query.filters[1].op == '=='
+                && request.query.filters[1].op == "=="
               )
               || (
                 // receiveUserIdとstatusとtypeフィルター
                 request.query.filters.size() == 3
                 && request.query.filters[0].field == 'receiveUserId'
-                && request.query.filters[0].op == '=='
+                && request.query.filters[0].op == "=="
                 && request.query.filters[0].value == request.auth.uid
                 && request.query.filters[1].field == 'status'
-                && request.query.filters[1].op == '=='
+                && request.query.filters[1].op == "=="
                 && request.query.filters[2].field == 'type'
-                && request.query.filters[2].op == '=='
+                && request.query.filters[2].op == "=="
               )
               || (
                 // receiveUserIdとisReadフィルター
                 request.query.filters.size() == 2
                 && request.query.filters[0].field == 'receiveUserId'
-                && request.query.filters[0].op == '=='
+                && request.query.filters[0].op == "=="
                 && request.query.filters[0].value == request.auth.uid
                 && request.query.filters[1].field == 'isRead'
-                && request.query.filters[1].op == '=='
+                && request.query.filters[1].op == "=="
               )
             )
           )
