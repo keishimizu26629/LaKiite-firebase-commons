@@ -11,24 +11,24 @@ service firebase.storage {
       return request.auth.uid == userId;
     }
 
-    // プロフィール画像のパス
-    match /users/{userId}/profile/{imageId} {
+    // ユーザー関連のファイルへのアクセス
+    match /users/{userId}/{allPaths=**} {
       // 読み取り:認証済みユーザーのみ
       allow read: if isAuthenticated();
 
-      // 作成・更新:自分の画像のみ
+      // 作成・更新:自分のファイルのみ
       allow create, update: if isAuthenticated() && isUser(userId) &&
         // 画像ファイルのみを許可
         request.resource.contentType.matches('image/.*') &&
         // ファイルサイズを5MB以下に制限
         request.resource.size <= 5 * 1024 * 1024;
 
-      // 削除:自分の画像のみ
+      // 削除:自分のファイルのみ
       allow delete: if isAuthenticated() && isUser(userId);
     }
 
-    // グループ画像のパス
-    match /groups/{groupId}/images/{imageId} {
+    // グループ関連のファイルへのアクセス
+    match /groups/{groupId}/{allPaths=**} {
       // グループのメンバーかどうかをチェック
       function isGroupMember() {
         return isAuthenticated() &&

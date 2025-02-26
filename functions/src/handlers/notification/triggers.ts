@@ -5,11 +5,12 @@ import * as admin from "firebase-admin";
 const db = admin.firestore();
 
 interface Notification {
-  type: "friend" | "groupInvitation";
+  type: "friend" | "groupInvitation" | "reaction" | "comment";
   sendUserId: string;
   receiveUserId: string;
   status: string;
   groupId?: string;
+  relatedItemId?: string;
 }
 
 /**

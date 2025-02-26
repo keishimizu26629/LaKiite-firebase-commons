@@ -32,24 +32,42 @@ service cloud.firestore {
     function hasRequiredScheduleFields(data) {
       return data.title is string
         && data.description is string
-        && data.startDateTime is timestamp
-        && data.endDateTime is timestamp
+        && data.startDateTime != null
+        && data.endDateTime != null
         && data.ownerId is string
         && data.sharedLists is list
-        && data.visibleTo is list;
+        && data.visibleTo is list
+        && data.ownerDisplayName is string
+        && data.reactionCount is number
+        && data.commentCount is number
+        && data.createdAt != null
+        && data.updatedAt != null;
     }
 
     // ユーザーがスケジュールにアクセス可能かを確認する関数
     function canAccessSchedule(scheduleData) {
       return request.auth != null && (
         scheduleData.ownerId == request.auth.uid ||
-        scheduleData.visibleTo.hasAny([request.auth.uid])
+        scheduleData.visibleTo.hasAny([request.auth.uid]) ||
+        (
+          scheduleData.sharedLists.size() > 0 &&
+          canAccessSharedList(scheduleData.sharedLists[0])
+        )
       );
     }
 
     // ユーザーがリストにアクセス可能かを確認する関数
     function canAccessList(listData) {
       return request.auth != null && (
+        listData.ownerId == request.auth.uid ||
+        listData.memberIds.hasAny([request.auth.uid])
+      );
+    }
+
+    // ユーザーが共有リストにアクセス可能かを確認する関数
+    function canAccessSharedList(listId) {
+      let listData = get(/databases/$(database)/documents/lists/$(listId)).data;
+      return listData != null && (
         listData.ownerId == request.auth.uid ||
         listData.memberIds.hasAny([request.auth.uid])
       );
@@ -105,11 +123,11 @@ service cloud.firestore {
 
       // 作成: 認証済みユーザーのみ
       allow create: if request.auth != null
-        && request.resource.data.ownerId == request.auth.uid
-        && request.resource.data.memberIds.hasAll([request.auth.uid]);
+        && request.resource.data.ownerId == request.auth.uid;
 
-      // 更新: リストの所有者またはメンバーのみ
-      allow update: if request.auth != null && canAccessList(resource.data);
+      // 更新: リストの所有者のみ
+      allow update: if request.auth != null
+        && resource.data.ownerId == request.auth.uid;
 
       // 削除: リストの所有者のみ
       allow delete: if request.auth != null
@@ -138,23 +156,51 @@ service cloud.firestore {
 
     // schedulesコレクションのルール
     match /schedules/{scheduleId} {
-      // 読み取り: スケジュールの所有者またはvisibleToに含まれるユーザーのみ
+      // 読み取り: スケジュールの所有者、visibleToに含まれるユーザー、または共有リストのメンバーのみ
       allow read: if request.auth != null && canAccessSchedule(resource.data);
+
+      // クエリの許可
+      allow list: if request.auth != null && (
+        // visibleToフィールドによるクエリ
+        (
+          request.query.filters.size() == 1 &&
+          request.query.filters[0].op == "array-contains" &&
+          request.query.filters[0].field == "visibleTo" &&
+          request.query.filters[0].value == request.auth.uid
+        )
+        ||
+        // ownerIdによるクエリ
+        (
+          request.query.filters.size() == 1 &&
+          request.query.filters[0].op == "==" &&
+          request.query.filters[0].field == "ownerId" &&
+          request.query.filters[0].value == request.auth.uid
+        )
+        ||
+        // sharedListsによるクエリ
+        (
+          request.query.filters.size() == 1 &&
+          request.query.filters[0].op == "array-contains" &&
+          request.query.filters[0].field == "sharedLists"
+        )
+      );
 
       // 作成: 認証済みユーザーのみ
       allow create: if request.auth != null
         && request.resource.data.ownerId == request.auth.uid
         && hasRequiredScheduleFields(request.resource.data)
-        // 共有リストへのアクセス権限を確認
-        && request.resource.data.sharedLists.size() == 0 || (
-          request.resource.data.sharedLists.size() > 0 &&
-          getAfter(/databases/$(database)/documents/lists/$(request.resource.data.sharedLists[0])).data.memberIds.hasAny([request.auth.uid])
-        );
+        && request.resource.data.reactionCount == 0
+        && request.resource.data.commentCount == 0;
 
       // 更新: スケジュールの所有者のみ
       allow update: if request.auth != null
         && resource.data.ownerId == request.auth.uid
-        && hasRequiredScheduleFields(request.resource.data);
+        && hasRequiredScheduleFields(request.resource.data)
+        && (
+          // カウンターの更新を許可
+          request.resource.data.reactionCount is number
+          && request.resource.data.commentCount is number
+        );
 
       // 削除: スケジュールの所有者のみ
       allow delete: if request.auth != null
@@ -163,11 +209,10 @@ service cloud.firestore {
       // reactionsサブコレクションのルール
       match /reactions/{reactionId} {
         // 読み取り: スケジュールにアクセス可能なユーザーのみ
-        allow read: if request.auth != null && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data);
+        allow read: if request.auth != null;
 
         // 作成・更新: スケジュールにアクセス可能なユーザーのみ、かつreactionIdは自分のユーザーIDと一致
         allow create, update: if request.auth != null
-          && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data)
           && reactionId == request.auth.uid
           && request.resource.data.userId == request.auth.uid;
 
@@ -178,11 +223,10 @@ service cloud.firestore {
       // commentsサブコレクションのルール
       match /comments/{commentId} {
         // 読み取り: スケジュールにアクセス可能なユーザーのみ
-        allow read: if request.auth != null && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data);
+        allow read: if request.auth != null;
 
         // 作成: スケジュールにアクセス可能なユーザーのみ
         allow create: if request.auth != null
-          && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data)
           && request.resource.data.userId == request.auth.uid;
 
         // 削除: 自分のコメントのみ
@@ -194,7 +238,7 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       // 必須フィールドの検証関数
       function hasRequiredFields(data) {
-        return data.type in ['friend', 'groupInvitation']
+        return data.type in ['friend', 'groupInvitation', 'reaction', 'comment']
           && data.sendUserId is string
           && data.receiveUserId is string
           && data.status in ['pending', 'accepted', 'rejected']
@@ -206,6 +250,17 @@ service cloud.firestore {
             // グループ招待の場合はgroupIdが必須
             data.type == 'groupInvitation'
               ? (data.groupId is string)
+              : true
+          )
+          && (
+            // リアクション・コメント通知の場合はrelatedItemIdとinteractionIdが必須
+            data.type in ['reaction', 'comment']
+              ? (
+                data.relatedItemId is string
+                && data.interactionId is string
+                && data.relatedItemId.size() > 0
+                && data.interactionId.size() > 0
+              )
               : true
           );
       }
@@ -223,8 +278,19 @@ service cloud.firestore {
       allow create: if request.auth != null
         && request.resource.data.sendUserId == request.auth.uid
         && hasRequiredFields(request.resource.data)
-        && request.resource.data.status == 'pending'
-        && request.resource.data.rejectionCount == 0
+        && (
+          // フレンド申請とグループ招待はpendingで作成
+          request.resource.data.type in ['friend', 'groupInvitation']
+            ? (
+              request.resource.data.status == 'pending'
+              && request.resource.data.rejectionCount == 0
+            )
+            // リアクション・コメントはacceptedで作成
+            : (
+              request.resource.data.status == 'accepted'
+              && request.resource.data.rejectionCount == 0
+            )
+        )
         && request.resource.data.isRead == false;
 
       // 読み取り:送信者または受信者のみ
