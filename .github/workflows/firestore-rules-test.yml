@@ -1,0 +1,177 @@
+name: Firestore Security Rules Test
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "security_rules/firestore/**"
+      - "tests/**"
+      - "package.json"
+  pull_request:
+    branches: [main]
+    paths:
+      - "security_rules/firestore/**"
+      - "tests/**"
+      - "package.json"
+
+jobs:
+  test-firestore-rules:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Firebase CLI
+        run: |
+          npm install -g firebase-tools
+          firebase --version
+
+      - name: Setup Java for Firebase Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "11"
+
+      - name: Cache Firebase Emulators
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/firebase/emulators
+          key: ${{ runner.os }}-firebase-emulators-${{ hashFiles('firebase.json') }}
+          restore-keys: |
+            ${{ runner.os }}-firebase-emulators-
+
+      - name: Install Firebase Emulators
+        run: |
+          firebase setup:emulators:firestore
+
+      - name: Run Firestore Rules Tests
+        run: |
+          npm run emulator:test
+        env:
+          CI: true
+
+      - name: Upload test coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: firestore-rules
+          name: firestore-rules-coverage
+          fail_ci_if_error: false
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-results-${{ matrix.node-version }}
+          path: |
+            coverage/
+            tests/
+
+      - name: Comment PR with test results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            try {
+              const summaryPath = path.join(process.cwd(), 'coverage/test-summary.md');
+              if (fs.existsSync(summaryPath)) {
+                const summary = fs.readFileSync(summaryPath, 'utf8');
+
+                github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: `## 🧪 Firestore Security Rules テスト結果\n\n${summary}`
+                });
+              }
+            } catch (error) {
+              console.log('テスト結果のコメント投稿に失敗しました:', error);
+            }
+
+  security-check:
+    runs-on: ubuntu-latest
+    needs: test-firestore-rules
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm audit --audit-level moderate
+
+      - name: Check for insecure rules patterns
+        run: |
+          echo "🔍 セキュリティルールの安全性をチェック中..."
+
+          # 危険なパターンをチェック
+          if grep -r "allow read, write: if true" security_rules/firestore/; then
+            echo "❌ 危険: すべてのアクセスを許可するルールが見つかりました"
+            exit 1
+          fi
+
+          if grep -r "allow.*if false" security_rules/firestore/ | grep -v "// テスト用"; then
+            echo "⚠️ 警告: アクセスを完全に拒否するルールがあります"
+          fi
+
+          if ! grep -q "request.auth" security_rules/firestore/firestore.rules; then
+            echo "❌ 危険: 認証チェックが含まれていません"
+            exit 1
+          fi
+
+          echo "✅ セキュリティルールの基本的なチェックが完了しました"
+
+  deploy-rules:
+    runs-on: ubuntu-latest
+    needs: [test-firestore-rules, security-check]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy Firestore Rules
+        run: |
+          echo "🚀 Firestoreセキュリティルールをデプロイ中..."
+          firebase deploy --only firestore:rules --token "${{ secrets.FIREBASE_TOKEN }}" --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+          echo "✅ デプロイが完了しました"
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}

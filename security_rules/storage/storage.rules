@@ -11,7 +11,23 @@ service firebase.storage {
       return request.auth.uid == userId;
     }
 
-    // プロフィール画像のパス
+    // 新しいプロフィール画像のパス (v1/users/icon/{userId})
+    match /v1/users/icon/{userId} {
+      // 読み取り:認証済みユーザーのみ
+      allow read: if isAuthenticated();
+
+      // 作成・更新:自分の画像のみ
+      allow create, update: if isAuthenticated() && isUser(userId) &&
+        // 画像ファイルのみを許可
+        request.resource.contentType.matches('image/.*') &&
+        // ファイルサイズを5MB以下に制限
+        request.resource.size <= 5 * 1024 * 1024;
+
+      // 削除:自分の画像のみ
+      allow delete: if isAuthenticated() && isUser(userId);
+    }
+
+    // 旧プロフィール画像のパス (後方互換性のため残す)
     match /users/{userId}/profile/{imageId} {
       // 読み取り:認証済みユーザーのみ
       allow read: if isAuthenticated();

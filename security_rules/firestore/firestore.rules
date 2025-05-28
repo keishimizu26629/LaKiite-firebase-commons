@@ -7,6 +7,12 @@ service cloud.firestore {
       return searchId.matches('^[a-zA-Z0-9]{8}$');
     }
 
+    // 管理者判定関数（実装例）
+    function isAdmin() {
+      // カスタムクレームまたは管理者リストでの判定
+      return request.auth.token.admin == true;
+    }
+
     // 公開プロフィールの必須フィールドを確認する関数
     function hasRequiredPublicFields(data) {
       return data.displayName != null
@@ -163,25 +169,72 @@ service cloud.firestore {
       allow list: if request.auth != null && (
         // visibleToフィールドによるクエリ
         (
-          request.query.filters.size() == 1 &&
-          request.query.filters[0].op == "array-contains" &&
-          request.query.filters[0].field == "visibleTo" &&
-          request.query.filters[0].value == request.auth.uid
+          request.query.filters.size() >= 1 &&
+          request.query.filters.hasAny([
+            // visibleToフィールドのみのクエリ
+            {
+              'op': 'array-contains',
+              'field': 'visibleTo',
+              'value': request.auth.uid
+            },
+            // visibleToフィールドとstartDateTimeフィールドの複合クエリ
+            {
+              'op': 'array-contains',
+              'field': 'visibleTo',
+              'value': request.auth.uid
+            },
+            {
+              'op': '>=',
+              'field': 'startDateTime',
+              'value': string
+            }
+          ])
         )
         ||
         // ownerIdによるクエリ
         (
-          request.query.filters.size() == 1 &&
-          request.query.filters[0].op == "==" &&
-          request.query.filters[0].field == "ownerId" &&
-          request.query.filters[0].value == request.auth.uid
+          request.query.filters.size() >= 1 &&
+          request.query.filters.hasAny([
+            // ownerIdフィールドのみのクエリ
+            {
+              'op': '==',
+              'field': 'ownerId',
+              'value': request.auth.uid
+            },
+            // ownerIdフィールドとstartDateTimeフィールドの複合クエリ
+            {
+              'op': '==',
+              'field': 'ownerId',
+              'value': request.auth.uid
+            },
+            {
+              'op': '>=',
+              'field': 'startDateTime',
+              'value': string
+            }
+          ])
         )
         ||
         // sharedListsによるクエリ
         (
-          request.query.filters.size() == 1 &&
-          request.query.filters[0].op == "array-contains" &&
-          request.query.filters[0].field == "sharedLists"
+          request.query.filters.size() >= 1 &&
+          request.query.filters.hasAny([
+            // sharedListsフィールドのみのクエリ
+            {
+              'op': 'array-contains',
+              'field': 'sharedLists'
+            },
+            // sharedListsフィールドとstartDateTimeフィールドの複合クエリ
+            {
+              'op': 'array-contains',
+              'field': 'sharedLists'
+            },
+            {
+              'op': '>=',
+              'field': 'startDateTime',
+              'value': string
+            }
+          ])
         )
       );
 
@@ -223,11 +276,27 @@ service cloud.firestore {
       // commentsサブコレクションのルール
       match /comments/{commentId} {
         // 読み取り: スケジュールにアクセス可能なユーザーのみ
-        allow read: if request.auth != null;
+        allow read: if request.auth != null && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data);
 
-        // 作成: スケジュールにアクセス可能なユーザーのみ
+        // 作成: 認証済みユーザーであれば作成可能
         allow create: if request.auth != null
-          && request.resource.data.userId == request.auth.uid;
+          // userId は自分自身でなければならない
+          && request.resource.data.userId == request.auth.uid
+          // 必須フィールドの型チェック
+          && request.resource.data.content is string
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.updatedAt is timestamp;
+
+        // 更新: 自分のコメントのみ
+        allow update: if request.auth != null
+          && resource.data.userId == request.auth.uid
+          // userId の改ざんを防止
+          && request.resource.data.userId == resource.data.userId
+          // 更新可能なフィールドを制限
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['content', 'updatedAt', 'isEdited'])
+          && request.resource.data.content is string
+          && request.resource.data.updatedAt is timestamp
+          && request.resource.data.isEdited is bool;
 
         // 削除: 自分のコメントのみ
         allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
@@ -243,9 +312,8 @@ service cloud.firestore {
           && data.receiveUserId is string
           && data.status in ['pending', 'accepted', 'rejected']
           && data.createdAt is timestamp
-          && data.updatedAt is timestamp
-          && data.rejectionCount is number
           && data.isRead is bool
+          && data.rejectionCount is number
           && (
             // グループ招待の場合はgroupIdが必須
             data.type == 'groupInvitation'
@@ -257,9 +325,7 @@ service cloud.firestore {
             data.type in ['reaction', 'comment']
               ? (
                 data.relatedItemId is string
-                && data.interactionId is string
-                && data.relatedItemId.size() > 0
-                && data.interactionId.size() > 0
+                && (data.interactionId == null || data.interactionId is string)
               )
               : true
           );
@@ -350,17 +416,75 @@ service cloud.firestore {
 
       // 更新:送信者または受信者のみ
       allow update: if request.auth != null
-        && isParticipant()
-        && hasRequiredFields(request.resource.data)
-        && request.resource.data.sendUserId == resource.data.sendUserId
-        && request.resource.data.receiveUserId == resource.data.receiveUserId
-        && request.resource.data.type == resource.data.type
         && (
-          // グループ招待の場合はgroupIdの変更を禁止
-          request.resource.data.type == 'groupInvitation'
-            ? (request.resource.data.groupId == resource.data.groupId)
-            : true
+          // 既読への更新の場合は簡易チェック
+          (
+            // 既読に関する更新であれば、受信者のみ許可
+            request.auth.uid == resource.data.receiveUserId
+            && request.resource.data.isRead == true
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'updatedAt'])
+          )
+          ||
+          // 通常の更新の場合は厳格なチェック
+          (
+            isParticipant()
+            && hasRequiredFields(request.resource.data)
+            && request.resource.data.sendUserId == resource.data.sendUserId
+            && request.resource.data.receiveUserId == resource.data.receiveUserId
+            && request.resource.data.type == resource.data.type
+            && (
+              // グループ招待の場合はgroupIdの変更を禁止
+              request.resource.data.type == 'groupInvitation'
+                ? (request.resource.data.groupId == resource.data.groupId)
+                : true
+            )
+          )
         );
+    }
+
+    // ユーザー更新履歴コレクションのルール
+    match /user_update_history/{historyId} {
+      // 読み取り: 管理者のみ（実装時に管理者判定ロジックを追加）
+      allow read: if request.auth != null && isAdmin();
+
+      // 作成: Cloud Functions のみ（サーバーサイドでのみ作成）
+      allow create: if false; // クライアントからの直接作成を禁止
+
+      // 更新: Cloud Functions のみ
+      allow update: if false; // クライアントからの直接更新を禁止
+
+      // 削除: 管理者のみ
+      allow delete: if request.auth != null && isAdmin();
+    }
+
+    // 管理者アラートコレクションのルール
+    match /admin_alerts/{alertId} {
+      // 読み取り: 管理者のみ
+      allow read: if request.auth != null && isAdmin();
+
+      // 作成: Cloud Functions のみ
+      allow create: if false;
+
+      // 更新: 管理者のみ
+      allow update: if request.auth != null && isAdmin();
+
+      // 削除: 管理者のみ
+      allow delete: if request.auth != null && isAdmin();
+    }
+
+    // バッチ処理統計コレクションのルール
+    match /batch_process_stats/{statsId} {
+      // 読み取り: 管理者のみ
+      allow read: if request.auth != null && isAdmin();
+
+      // 作成: Cloud Functions のみ
+      allow create: if false;
+
+      // 更新: 禁止
+      allow update: if false;
+
+      // 削除: 管理者のみ
+      allow delete: if request.auth != null && isAdmin();
     }
   }
 }
