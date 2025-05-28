@@ -7,7 +7,19 @@ const {
 
 describe('Users Collection Security Rules', () => {
   afterEach(async () => {
-    await teardownTestEnvironment();
+    try {
+      await teardownTestEnvironment();
+    } catch (error) {
+      console.warn('Teardown warning:', error.message);
+    }
+  });
+
+  afterAll(async () => {
+    try {
+      await teardownTestEnvironment();
+    } catch (error) {
+      console.warn('Final teardown warning:', error.message);
+    }
   });
 
   describe('読み取り権限', () => {

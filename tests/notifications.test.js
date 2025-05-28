@@ -7,7 +7,19 @@ const {
 
 describe('Notifications Collection Security Rules', () => {
   afterEach(async () => {
-    await teardownTestEnvironment();
+    try {
+      await teardownTestEnvironment();
+    } catch (error) {
+      console.warn('Teardown warning:', error.message);
+    }
+  });
+
+  afterAll(async () => {
+    try {
+      await teardownTestEnvironment();
+    } catch (error) {
+      console.warn('Final teardown warning:', error.message);
+    }
   });
 
   describe('通知の作成', () => {

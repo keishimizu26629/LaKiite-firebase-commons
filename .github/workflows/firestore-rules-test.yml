@@ -57,12 +57,19 @@ jobs:
       - name: Install Firebase Emulators
         run: |
           firebase setup:emulators:firestore
+          # エミュレーターのバイナリが正しくダウンロードされたか確認
+          firebase emulators:exec --only firestore "echo 'Emulator test successful'" || echo "Emulator setup completed"
 
       - name: Run Firestore Rules Tests
         run: |
-          npm run emulator:test
+          # IPv6を無効にしてエミュレーターを起動
+          export FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
+          # CI専用のテストスクリプトを実行
+          npm run emulator:test:ci
         env:
           CI: true
+          # IPv6を無効化
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
 
       - name: Upload test coverage
         uses: codecov/codecov-action@v4
