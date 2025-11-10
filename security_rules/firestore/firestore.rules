@@ -25,6 +25,7 @@ service cloud.firestore {
       return data.name != null
         && data.friends != null
         && data.groups != null
+        && data.lists != null
         && data.createdAt != null;
     }
 

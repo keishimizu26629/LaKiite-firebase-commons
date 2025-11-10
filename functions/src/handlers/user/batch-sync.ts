@@ -100,10 +100,12 @@ export async function processUserUpdates(userId: string, updates: UserUpdateData
 
     console.log(`ユーザー ${userId} の最新更新:`, latestUpdates);
 
-    // バッチ処理でリアクション・コメントを更新
+    // バッチ処理でリアクション・コメント・通知・スケジュールを更新
     await Promise.all([
       updateReactions(userId, latestUpdates),
       updateComments(userId, latestUpdates),
+      updateNotifications(userId, latestUpdates),
+      updateSchedules(userId, latestUpdates),
     ]);
 
     // 処理完了をマーク
@@ -226,6 +228,142 @@ async function updateComments(
 
   await Promise.all(batches.map((batch) => batch.commit()));
   console.log(`${userId} のコメント ${commentQuery.size} 件を更新完了`);
+}
+
+/**
+ * 通知データの更新
+ */
+async function updateNotifications(
+  userId: string,
+  latestUpdates: Record<string, string>
+) {
+  // 送信者としての通知を更新
+  const sendNotificationsQuery = await admin
+    .firestore()
+    .collection("notifications")
+    .where("sendUserId", "==", userId)
+    .get();
+
+  // 受信者としての通知を更新
+  const receiveNotificationsQuery = await admin
+    .firestore()
+    .collection("notifications")
+    .where("receiveUserId", "==", userId)
+    .get();
+
+  // 重複を除去（同じ通知が送信者と受信者の両方のクエリに含まれる可能性がある）
+  const notificationMap = new Map<string, admin.firestore.QueryDocumentSnapshot>();
+  sendNotificationsQuery.docs.forEach((doc) => {
+    notificationMap.set(doc.id, doc);
+  });
+  receiveNotificationsQuery.docs.forEach((doc) => {
+    notificationMap.set(doc.id, doc);
+  });
+  const allNotifications = Array.from(notificationMap.values());
+
+  if (allNotifications.length === 0) {
+    console.log(`ユーザー ${userId}: 更新対象の通知なし`);
+    return;
+  }
+
+  console.log(`ユーザー ${userId}: ${allNotifications.length}件の通知を更新`);
+
+  const batches: admin.firestore.WriteBatch[] = [];
+  let currentBatch = admin.firestore().batch();
+  let operationCount = 0;
+
+  allNotifications.forEach((doc) => {
+    const data = doc.data();
+    const updateData: Record<string, string> = {};
+
+    // 送信者の場合
+    if (data.sendUserId === userId) {
+      if (latestUpdates.displayName) {
+        updateData.sendUserDisplayName = latestUpdates.displayName;
+      }
+      // 通知には sendUserPhotoUrl フィールドがないため、iconUrl の更新はスキップ
+    }
+
+    // 受信者の場合
+    if (data.receiveUserId === userId) {
+      if (latestUpdates.displayName) {
+        updateData.receiveUserDisplayName = latestUpdates.displayName;
+      }
+      // 通知には receiveUserPhotoUrl フィールドがないため、iconUrl の更新はスキップ
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      currentBatch.update(doc.ref, updateData);
+      operationCount++;
+
+      if (operationCount >= 500) {
+        batches.push(currentBatch);
+        currentBatch = admin.firestore().batch();
+        operationCount = 0;
+      }
+    }
+  });
+
+  if (operationCount > 0) {
+    batches.push(currentBatch);
+  }
+
+  await Promise.all(batches.map((batch) => batch.commit()));
+  console.log(`${userId} の通知 ${allNotifications.length} 件を更新完了`);
+}
+
+/**
+ * スケジュールデータの更新
+ */
+async function updateSchedules(
+  userId: string,
+  latestUpdates: Record<string, string>
+) {
+  const scheduleQuery = await admin
+    .firestore()
+    .collection("schedules")
+    .where("ownerId", "==", userId)
+    .get();
+
+  if (scheduleQuery.empty) {
+    console.log(`ユーザー ${userId}: 更新対象のスケジュールなし`);
+    return;
+  }
+
+  console.log(`ユーザー ${userId}: ${scheduleQuery.size}件のスケジュールを更新`);
+
+  const batches: admin.firestore.WriteBatch[] = [];
+  let currentBatch = admin.firestore().batch();
+  let operationCount = 0;
+
+  scheduleQuery.docs.forEach((doc) => {
+    const updateData: Record<string, string> = {};
+
+    if (latestUpdates.displayName) {
+      updateData.ownerDisplayName = latestUpdates.displayName;
+    }
+    if (latestUpdates.iconUrl) {
+      updateData.ownerPhotoUrl = latestUpdates.iconUrl;
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      currentBatch.update(doc.ref, updateData);
+      operationCount++;
+
+      if (operationCount >= 500) {
+        batches.push(currentBatch);
+        currentBatch = admin.firestore().batch();
+        operationCount = 0;
+      }
+    }
+  });
+
+  if (operationCount > 0) {
+    batches.push(currentBatch);
+  }
+
+  await Promise.all(batches.map((batch) => batch.commit()));
+  console.log(`${userId} のスケジュール ${scheduleQuery.size} 件を更新完了`);
 }
 
 /**

@@ -1,6 +1,16 @@
 {
   "projects": {
-    "default": "tarakite-flutter-app-dev",
+    "default": "lakiite-flutter-app-dev",
     "prod": "lakiite-flutter-app-prod"
-  }
+  },
+  "targets": {
+    "lakiite-flutter-app-dev": {
+      "hosting": {
+        "dev": [
+          "lakiite-flutter-app-dev"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

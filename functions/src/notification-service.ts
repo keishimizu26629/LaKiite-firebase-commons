@@ -118,19 +118,23 @@ export const onNewFriendRequest = onDocumentCreated({
   document: "notifications/{notificationId}"
 }, async (event) => {
   try {
+    console.log("🚀 onNewFriendRequest トリガーが実行されました");
     const snapshot = event.data;
     if (!snapshot) {
-      console.log("データが存在しません");
+      console.log("❌ データが存在しません");
       return;
     }
 
     const notification = snapshot.data();
+    console.log("📋 受信した通知データ:", JSON.stringify(notification, null, 2));
 
     // 友達申請通知かどうかを確認
     if (notification.type !== "friend") {
-      console.log("友達申請以外の通知のため、処理をスキップします");
+      console.log(`⚠️  友達申請以外の通知のため、処理をスキップします。type: ${notification.type}`);
       return;
     }
+
+    console.log("✅ 友達申請通知を処理開始");
 
     // 受信者のFCMトークンを取得
     const userDoc = await admin.firestore()
@@ -188,8 +192,9 @@ export const onNewFriendRequest = onDocumentCreated({
     };
 
     // 通知送信
+    console.log("📤 通知送信を開始:", JSON.stringify(message, null, 2));
     const response = await admin.messaging().send(message);
-    console.log("友達申請通知送信成功:", response);
+    console.log("✅ 友達申請通知送信成功:", response);
   } catch (error) {
     console.error("友達申請通知送信エラー:", error);
   }
