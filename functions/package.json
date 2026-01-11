@@ -13,7 +13,7 @@
     "test:watch": "npm run build:watch & mocha lib/test/**/*.test.js --watch"
   },
   "engines": {
-    "node": "18"
+    "node": "20"
   },
   "main": "lib/index.js",
   "dependencies": {
