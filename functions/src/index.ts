@@ -18,8 +18,8 @@ export * from "./handlers/schedule/triggers";
 
 // ユーザー関連のトリガーをエクスポート
 export * from "./handlers/user/triggers";
-export * from "./handlers/user/batch-sync";
-export * from "./handlers/user/monitoring";
+// export * from "./handlers/user/batch-sync"; // 即時同期により廃止
+// export * from "./handlers/user/monitoring"; // 監視機能は不要
 export * from "./handlers/user/manual-sync";
 
 // 通知関連の関数をエクスポート
