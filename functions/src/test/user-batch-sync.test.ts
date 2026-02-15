@@ -2,11 +2,11 @@ import { expect } from "chai";
 
 describe("User Batch Sync", () => {
   describe("userDataSyncBatch", () => {
-    it("should be importable", async () => {
-      const { userDataSyncBatch } = await import("../handlers/user/batch-sync");
+    it("should not be exported in immediate-sync mode", async () => {
+      const mod = await import("../handlers/user/batch-sync");
+      const exported = (mod as Record<string, unknown>).userDataSyncBatch;
 
-      expect(userDataSyncBatch).to.not.be.undefined;
-      expect(typeof userDataSyncBatch).to.equal("function");
+      expect(exported).to.be.undefined;
     });
   });
 
