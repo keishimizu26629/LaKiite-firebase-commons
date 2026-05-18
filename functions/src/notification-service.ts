@@ -3,6 +3,8 @@ import { onRequest } from "firebase-functions/v2/https";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { Request, Response } from "express";
 
+type MessageWithoutToken = Omit<admin.messaging.TokenMessage, "token">;
+
 /**
  * プッシュ通知を送信するCloud Function
  *
@@ -102,10 +104,93 @@ export const sendNotification = onRequest({
     console.error("通知送信エラー:", error);
     res.status(500).send({
       error: error instanceof Error ? error.message : "Unknown error",
-      code: (error as any).code || "unknown_error"
+      code: getErrorCode(error)
     });
   }
 });
+
+function getErrorCode(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return error.code;
+  }
+
+  return "unknown_error";
+}
+
+async function getRecipientFcmTokens(
+  receiveUserId: string,
+  logContext: string
+): Promise<string[]> {
+  const userDoc = await admin.firestore()
+    .collection("users")
+    .doc(receiveUserId)
+    .get();
+
+  if (!userDoc.exists) {
+    console.error(`${logContext}: 受信者が存在しません:`, receiveUserId);
+    return [];
+  }
+
+  const userData = userDoc.data();
+  if (!userData) {
+    console.error(`${logContext}: 受信者データが空です:`, receiveUserId);
+    return [];
+  }
+
+  const rawTokens = userData.fcmTokens;
+  if (!Array.isArray(rawTokens)) {
+    console.log(`${logContext}: 受信者のFCMトークン配列がありません:`, receiveUserId);
+    return [];
+  }
+
+  const tokens = [...new Set(
+    rawTokens.filter((token): token is string => typeof token === "string" && token.length > 0)
+  )];
+
+  if (tokens.length === 0) {
+    console.log(`${logContext}: 受信者のFCMトークンがありません:`, receiveUserId);
+  }
+
+  return tokens;
+}
+
+async function sendToFcmTokens(
+  tokens: string[],
+  message: MessageWithoutToken,
+  logContext: string
+): Promise<void> {
+  if (tokens.length === 0) {
+    return;
+  }
+
+  const messages: admin.messaging.Message[] = tokens.map((token) => ({
+    ...message,
+    token,
+  }));
+  const response = await admin.messaging().sendEach(messages);
+
+  response.responses.forEach((sendResponse, index) => {
+    if (!sendResponse.success) {
+      console.error(
+        `${logContext}送信失敗: ${maskFcmToken(tokens[index])}`,
+        sendResponse.error
+      );
+    }
+  });
+
+  console.log(
+    `${logContext}送信結果: success=${response.successCount}, failure=${response.failureCount}`
+  );
+}
+
+function maskFcmToken(token: string): string {
+  return token.length <= 20 ? token : `${token.substring(0, 20)}...`;
+}
 
 /**
  * 新しい友達申請が作成された時に自動的にプッシュ通知を送信する
@@ -132,33 +217,16 @@ export const onNewFriendRequest = onDocumentCreated({
       return;
     }
 
-    // 受信者のFCMトークンを取得
-    const userDoc = await admin.firestore()
-      .collection("users")
-      .doc(notification.receiveUserId)
-      .get();
-
-    if (!userDoc.exists) {
-      console.error("受信者が存在しません:", notification.receiveUserId);
-      return;
-    }
-
-    const userData = userDoc.data();
-    if (!userData) {
-      console.error("受信者データが空です:", notification.receiveUserId);
-      return;
-    }
-
-    const fcmToken = userData.fcmToken;
-
-    if (!fcmToken) {
-      console.log("受信者のFCMトークンがありません:", notification.receiveUserId);
+    const fcmTokens = await getRecipientFcmTokens(
+      notification.receiveUserId,
+      "友達申請通知"
+    );
+    if (fcmTokens.length === 0) {
       return;
     }
 
     // 通知メッセージを作成
-    const message: admin.messaging.Message = {
-      token: fcmToken,
+    const message: MessageWithoutToken = {
       notification: {
         title: "友達申請が届きました",
         body: `${notification.sendUserDisplayName || "新しいユーザー"}さんから友達申請が届いています`,
@@ -188,8 +256,7 @@ export const onNewFriendRequest = onDocumentCreated({
     };
 
     // 通知送信
-    const response = await admin.messaging().send(message);
-    console.log("友達申請通知送信成功:", response);
+    await sendToFcmTokens(fcmTokens, message, "友達申請通知");
   } catch (error) {
     console.error("友達申請通知送信エラー:", error);
   }
@@ -217,27 +284,11 @@ export const onNewGroupInvitation = onDocumentCreated({
       return;
     }
 
-    // 受信者のFCMトークンを取得
-    const userDoc = await admin.firestore()
-      .collection("users")
-      .doc(notification.receiveUserId)
-      .get();
-
-    if (!userDoc.exists) {
-      console.error("受信者が存在しません:", notification.receiveUserId);
-      return;
-    }
-
-    const userData = userDoc.data();
-    if (!userData) {
-      console.error("受信者データが空です:", notification.receiveUserId);
-      return;
-    }
-
-    const fcmToken = userData.fcmToken;
-
-    if (!fcmToken) {
-      console.log("受信者のFCMトークンがありません:", notification.receiveUserId);
+    const fcmTokens = await getRecipientFcmTokens(
+      notification.receiveUserId,
+      "グループ招待通知"
+    );
+    if (fcmTokens.length === 0) {
       return;
     }
 
@@ -259,8 +310,7 @@ export const onNewGroupInvitation = onDocumentCreated({
     }
 
     // 通知メッセージを作成
-    const message: admin.messaging.Message = {
-      token: fcmToken,
+    const message: MessageWithoutToken = {
       notification: {
         title: "グループ招待が届きました",
         body: `${notification.sendUserDisplayName || "新しいユーザー"}さんから「${groupData.name}」グループへの招待が届いています`,
@@ -292,8 +342,7 @@ export const onNewGroupInvitation = onDocumentCreated({
     };
 
     // 通知送信
-    const response = await admin.messaging().send(message);
-    console.log("グループ招待通知送信成功:", response);
+    await sendToFcmTokens(fcmTokens, message, "グループ招待通知");
   } catch (error) {
     console.error("グループ招待通知送信エラー:", error);
   }
@@ -321,33 +370,16 @@ export const onNewReactionNotification = onDocumentCreated({
       return;
     }
 
-    // 受信者のFCMトークンを取得
-    const userDoc = await admin.firestore()
-      .collection("users")
-      .doc(notification.receiveUserId)
-      .get();
-
-    if (!userDoc.exists) {
-      console.error("受信者が存在しません:", notification.receiveUserId);
-      return;
-    }
-
-    const userData = userDoc.data();
-    if (!userData) {
-      console.error("受信者データが空です:", notification.receiveUserId);
-      return;
-    }
-
-    const fcmToken = userData.fcmToken;
-
-    if (!fcmToken) {
-      console.log("受信者のFCMトークンがありません:", notification.receiveUserId);
+    const fcmTokens = await getRecipientFcmTokens(
+      notification.receiveUserId,
+      "リアクション通知"
+    );
+    if (fcmTokens.length === 0) {
       return;
     }
 
     // 通知メッセージを作成
-    const message: admin.messaging.Message = {
-      token: fcmToken,
+    const message: MessageWithoutToken = {
       notification: {
         title: "新しいリアクション",
         body: `${notification.sendUserDisplayName || "新しいユーザー"}さんがあなたの投稿にリアクションしました`,
@@ -379,8 +411,7 @@ export const onNewReactionNotification = onDocumentCreated({
     };
 
     // 通知送信
-    const response = await admin.messaging().send(message);
-    console.log("リアクション通知送信成功:", response);
+    await sendToFcmTokens(fcmTokens, message, "リアクション通知");
   } catch (error) {
     console.error("リアクション通知送信エラー:", error);
   }
@@ -408,27 +439,11 @@ export const onNewCommentNotification = onDocumentCreated({
       return;
     }
 
-    // 受信者のFCMトークンを取得
-    const userDoc = await admin.firestore()
-      .collection("users")
-      .doc(notification.receiveUserId)
-      .get();
-
-    if (!userDoc.exists) {
-      console.error("受信者が存在しません:", notification.receiveUserId);
-      return;
-    }
-
-    const userData = userDoc.data();
-    if (!userData) {
-      console.error("受信者データが空です:", notification.receiveUserId);
-      return;
-    }
-
-    const fcmToken = userData.fcmToken;
-
-    if (!fcmToken) {
-      console.log("受信者のFCMトークンがありません:", notification.receiveUserId);
+    const fcmTokens = await getRecipientFcmTokens(
+      notification.receiveUserId,
+      "コメント通知"
+    );
+    if (fcmTokens.length === 0) {
       return;
     }
 
@@ -460,8 +475,7 @@ export const onNewCommentNotification = onDocumentCreated({
     }
 
     // 通知メッセージを作成
-    const message: admin.messaging.Message = {
-      token: fcmToken,
+    const message: MessageWithoutToken = {
       notification: {
         title: "新しいコメント",
         body: `${notification.sendUserDisplayName || "新しいユーザー"}さんがあなたの投稿にコメントしました${commentContent ? ": " + commentContent : ""}`,
@@ -494,8 +508,7 @@ export const onNewCommentNotification = onDocumentCreated({
     };
 
     // 通知送信
-    const response = await admin.messaging().send(message);
-    console.log("コメント通知送信成功:", response);
+    await sendToFcmTokens(fcmTokens, message, "コメント通知");
   } catch (error) {
     console.error("コメント通知送信エラー:", error);
   }
