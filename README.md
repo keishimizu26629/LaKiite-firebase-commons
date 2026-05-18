@@ -15,6 +15,7 @@
 
 ```bash
 npm install
+npm --prefix functions install
 ```
 
 ### 2. Firebase CLI のインストール
@@ -27,6 +28,62 @@ npm install -g firebase-tools
 
 ```bash
 firebase setup:emulators:firestore
+```
+
+## 🚢 デプロイ
+
+Firebaseプロジェクトは `.firebaserc` の alias で管理しています。
+
+| alias | project |
+| --- | --- |
+| `dev` | `lakiite-flutter-app-dev` |
+| `prod` | `lakiite-flutter-app-prod` |
+
+### Cloud Functions
+
+```bash
+# devへデプロイ
+npm run deploy:functions:dev
+
+# prodへデプロイ
+npm run deploy:functions:prod
+```
+
+`functions/` 配下から実行する場合:
+
+```bash
+cd functions
+npm run deploy:functions:dev
+npm run deploy:functions:prod
+```
+
+### Firestore / Storage ルール
+
+```bash
+npm run deploy:rules:dev
+npm run deploy:rules:prod
+```
+
+### Firestore インデックス
+
+```bash
+npm run deploy:indexes:dev
+npm run deploy:indexes:prod
+```
+
+### Functionsログ確認
+
+```bash
+npm run logs:functions:dev
+npm run logs:functions:prod
+```
+
+FunctionsはNode.js 20で動作します。deploy/test scriptはZENと同様に `nvm use 20.9.0` を実行してからFirebase CLIを呼び出します。
+
+ローカルのNodeが20以外の場合も、Functionsテストは以下で実行してください。
+
+```bash
+npm run functions:test
 ```
 
 ## 🧪 テストの実行

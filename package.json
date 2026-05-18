@@ -9,7 +9,18 @@
     "test:coverage": "jest --coverage",
     "emulator:start": "firebase emulators:start --only firestore",
     "emulator:test": "firebase emulators:exec --only firestore 'sleep 3 && npm test'",
-    "emulator:test:ci": "firebase emulators:exec --only firestore --project demo-test 'sleep 5 && npm test'"
+    "emulator:test:ci": "firebase emulators:exec --only firestore --project demo-test 'sleep 5 && npm test'",
+    "functions:build": "npm --prefix functions run build",
+    "functions:lint": "npm --prefix functions run lint",
+    "functions:test": "npm --prefix functions run test:node20",
+    "deploy:functions:dev": "npm --prefix functions run deploy:functions:dev",
+    "deploy:functions:prod": "npm --prefix functions run deploy:functions:prod",
+    "deploy:rules:dev": "npm --prefix functions run deploy:rules:dev",
+    "deploy:rules:prod": "npm --prefix functions run deploy:rules:prod",
+    "deploy:indexes:dev": "npm --prefix functions run deploy:indexes:dev",
+    "deploy:indexes:prod": "npm --prefix functions run deploy:indexes:prod",
+    "logs:functions:dev": "npm --prefix functions run logs:dev",
+    "logs:functions:prod": "npm --prefix functions run logs:prod"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.3",
