@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "tarakite-flutter-app-dev",
+    "default": "lakiite-flutter-app-dev",
+    "dev": "lakiite-flutter-app-dev",
     "prod": "lakiite-flutter-app-prod"
   }
 }

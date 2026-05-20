@@ -7,13 +7,24 @@
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
-    "deploy": "firebase deploy --only functions",
+    "use:dev": "firebase use dev",
+    "use:prod": "firebase use prod",
+    "deploy": "npm run deploy:functions:dev",
+    "deploy:functions:dev": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && firebase deploy --only functions --project dev'",
+    "deploy:functions:prod": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && firebase deploy --only functions --project prod'",
+    "deploy:rules:dev": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && firebase deploy --only firestore:rules,storage --project dev'",
+    "deploy:rules:prod": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && firebase deploy --only firestore:rules,storage --project prod'",
+    "deploy:indexes:dev": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && firebase deploy --only firestore:indexes --project dev'",
+    "deploy:indexes:prod": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && firebase deploy --only firestore:indexes --project prod'",
+    "logs:dev": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && firebase functions:log --project dev'",
+    "logs:prod": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && firebase functions:log --project prod'",
     "logs": "firebase functions:log",
     "test": "npm run build && mocha lib/test/**/*.test.js",
+    "test:node20": "bash -lc 'unset npm_config_prefix && . \"$HOME/.nvm/nvm.sh\" && nvm use 20.9.0 >/dev/null && npm run build && ./node_modules/.bin/mocha lib/test/**/*.test.js'",
     "test:watch": "npm run build:watch & mocha lib/test/**/*.test.js --watch"
   },
   "engines": {
-    "node": "18"
+    "node": "20"
   },
   "main": "lib/index.js",
   "dependencies": {
