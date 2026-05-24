@@ -1,5 +1,8 @@
 import * as admin from "firebase-admin";
 
+/**
+ * 退会済みユーザーとして画面に表示する匿名化後の表示名。
+ */
 export const retiredUserDisplayName = "退会済みユーザー";
 
 interface NotificationSnapshot {
@@ -7,6 +10,9 @@ interface NotificationSnapshot {
   status?: string;
 }
 
+/**
+ * コメント・リアクションに保存された投稿者スナップショットを匿名化する更新値を返す。
+ */
 export function buildRetiredUserProfileUpdate() {
   return {
     userDisplayName: retiredUserDisplayName,
@@ -14,6 +20,11 @@ export function buildRetiredUserProfileUpdate() {
   };
 }
 
+/**
+ * 削除ユーザーが送信者になっている通知を匿名化する更新値を返す。
+ *
+ * 未処理の友達申請は、承認できない状態として既読の期限切れ通知へ更新する。
+ */
 export function buildRetiredUserNotificationUpdate(
   notification: NotificationSnapshot
 ) {
@@ -29,10 +40,19 @@ export function buildRetiredUserNotificationUpdate(
   return updateData;
 }
 
+/**
+ * friends配列から退会済みユーザーIDだけを取り除く。
+ */
 export function removeRetiredUserId(friendIds: string[], retiredUserId: string) {
   return friendIds.filter((friendId) => friendId !== retiredUserId);
 }
 
+/**
+ * ユーザー削除後も画面に残り得る参照を退会済みユーザー表示へ寄せる。
+ *
+ * 既存データの一括移行ではなく、削除イベントを起点に関連する表示スナップショットと
+ * 友達関係をクリーンアップする。
+ */
 export async function cleanupRetiredUserReferences(userId: string) {
   await Promise.all([
     anonymizeCollectionGroup("reactions", userId),

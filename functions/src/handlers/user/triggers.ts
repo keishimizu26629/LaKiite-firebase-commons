@@ -77,7 +77,10 @@ export const onUserUpdate = functions.onDocumentUpdated(
 );
 
 /**
- * ユーザー削除時に、画面に残る参照を退会済みユーザーとして扱える状態へ更新
+ * ユーザー削除時に、画面に残る参照を退会済みユーザーとして扱える状態へ更新する。
+ *
+ * コメント・リアクション・通知に残る表示用スナップショットを匿名化し、
+ * 他ユーザーのfriends配列から削除済みユーザーIDを取り除く。
  */
 export const onUserDeleted = functions.onDocumentDeleted(
   {
