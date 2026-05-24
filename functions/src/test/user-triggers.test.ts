@@ -10,4 +10,13 @@ describe("User Triggers", () => {
       expect(typeof onUserUpdate).to.equal("function");
     });
   });
+
+  describe("onUserDeleted", () => {
+    it("should be importable", async () => {
+      const { onUserDeleted } = await import("../handlers/user/triggers");
+
+      expect(onUserDeleted).to.not.be.undefined;
+      expect(typeof onUserDeleted).to.equal("function");
+    });
+  });
 });
