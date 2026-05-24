@@ -1,5 +1,6 @@
 import * as functions from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
+import { cleanupRetiredUserReferences } from "./deletion-cleanup";
 
 /**
  * ユーザー情報更新時に履歴を記録
@@ -71,6 +72,28 @@ export const onUserUpdate = functions.onDocumentUpdated(
     } catch (error) {
       console.error("ユーザー更新履歴記録エラー:", error);
       // エラーが発生してもトリガーは失敗させない
+    }
+  }
+);
+
+/**
+ * ユーザー削除時に、画面に残る参照を退会済みユーザーとして扱える状態へ更新
+ */
+export const onUserDeleted = functions.onDocumentDeleted(
+  {
+    document: "users/{userId}",
+    region: "asia-northeast1",
+    memory: "1GiB",
+    timeoutSeconds: 540,
+  },
+  async (event) => {
+    try {
+      const userId = event.params.userId;
+      await cleanupRetiredUserReferences(userId);
+      console.log(`退会済みユーザー参照のクリーンアップ完了: ${userId}`);
+    } catch (error) {
+      console.error("退会済みユーザー参照のクリーンアップエラー:", error);
+      throw error;
     }
   }
 );
