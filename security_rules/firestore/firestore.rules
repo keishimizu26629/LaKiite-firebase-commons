@@ -310,7 +310,7 @@ service cloud.firestore {
         return data.type in ['friend', 'groupInvitation', 'reaction', 'comment']
           && data.sendUserId is string
           && data.receiveUserId is string
-          && data.status in ['pending', 'accepted', 'rejected']
+          && data.status in ['pending', 'accepted', 'rejected', 'expired']
           && data.createdAt is timestamp
           && data.isRead is bool
           && data.rejectionCount is number
