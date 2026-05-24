@@ -1,5 +1,6 @@
 import * as functions from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
+import { syncUserProfileSnapshots } from "./profile-sync";
 
 export interface UserUpdateData {
   id: string;
@@ -100,11 +101,8 @@ export async function processUserUpdates(userId: string, updates: UserUpdateData
 
     console.log(`ユーザー ${userId} の最新更新:`, latestUpdates);
 
-    // バッチ処理でリアクション・コメントを更新
-    await Promise.all([
-      updateReactions(userId, latestUpdates),
-      updateComments(userId, latestUpdates),
-    ]);
+    // バッチ処理で表示用スナップショットを更新
+    await syncUserProfileSnapshots(userId, latestUpdates);
 
     // 処理完了をマーク
     await markAsProcessed(updates);
@@ -116,116 +114,6 @@ export async function processUserUpdates(userId: string, updates: UserUpdateData
     await incrementRetryCount(updates, errorMessage);
     throw error;
   }
-}
-
-/**
- * リアクションデータの更新
- */
-async function updateReactions(
-  userId: string,
-  latestUpdates: Record<string, string>
-) {
-  const reactionQuery = await admin
-    .firestore()
-    .collectionGroup("reactions")
-    .where("userId", "==", userId)
-    .get();
-
-  if (reactionQuery.empty) {
-    console.log(`ユーザー ${userId}: 更新対象のリアクションなし`);
-    return;
-  }
-
-  console.log(`ユーザー ${userId}: ${reactionQuery.size}件のリアクションを更新`);
-
-  const batches: admin.firestore.WriteBatch[] = [];
-  let currentBatch = admin.firestore().batch();
-  let operationCount = 0;
-
-  reactionQuery.docs.forEach((doc) => {
-    const updateData: Record<string, string> = {};
-
-    if (latestUpdates.displayName) {
-      updateData.userDisplayName = latestUpdates.displayName;
-    }
-    if (latestUpdates.iconUrl) {
-      updateData.userPhotoUrl = latestUpdates.iconUrl;
-    }
-
-    if (Object.keys(updateData).length > 0) {
-      currentBatch.update(doc.ref, updateData);
-      operationCount++;
-
-      // Firestoreのバッチ制限（500操作）に達したら新しいバッチを作成
-      if (operationCount >= 500) {
-        batches.push(currentBatch);
-        currentBatch = admin.firestore().batch();
-        operationCount = 0;
-      }
-    }
-  });
-
-  if (operationCount > 0) {
-    batches.push(currentBatch);
-  }
-
-  // 全バッチを並列実行
-  await Promise.all(batches.map((batch) => batch.commit()));
-  console.log(`${userId} のリアクション ${reactionQuery.size} 件を更新完了`);
-}
-
-/**
- * コメントデータの更新
- */
-async function updateComments(
-  userId: string,
-  latestUpdates: Record<string, string>
-) {
-  const commentQuery = await admin
-    .firestore()
-    .collectionGroup("comments")
-    .where("userId", "==", userId)
-    .get();
-
-  if (commentQuery.empty) {
-    console.log(`ユーザー ${userId}: 更新対象のコメントなし`);
-    return;
-  }
-
-  console.log(`ユーザー ${userId}: ${commentQuery.size}件のコメントを更新`);
-
-  const batches: admin.firestore.WriteBatch[] = [];
-  let currentBatch = admin.firestore().batch();
-  let operationCount = 0;
-
-  commentQuery.docs.forEach((doc) => {
-    const updateData: Record<string, string> = {};
-
-    if (latestUpdates.displayName) {
-      updateData.userDisplayName = latestUpdates.displayName;
-    }
-    if (latestUpdates.iconUrl) {
-      updateData.userPhotoUrl = latestUpdates.iconUrl;
-    }
-
-    if (Object.keys(updateData).length > 0) {
-      currentBatch.update(doc.ref, updateData);
-      operationCount++;
-
-      if (operationCount >= 500) {
-        batches.push(currentBatch);
-        currentBatch = admin.firestore().batch();
-        operationCount = 0;
-      }
-    }
-  });
-
-  if (operationCount > 0) {
-    batches.push(currentBatch);
-  }
-
-  await Promise.all(batches.map((batch) => batch.commit()));
-  console.log(`${userId} のコメント ${commentQuery.size} 件を更新完了`);
 }
 
 /**
