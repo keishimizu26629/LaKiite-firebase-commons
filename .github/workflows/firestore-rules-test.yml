@@ -11,6 +11,8 @@ on:
       - "package.json"
       - "package-lock.json"
       - "firebase.json"
+      - ".github/workflows/firestore-rules-test.yml"
+      - ".github/workflows/firebase-hosting-deploy.yml"
   pull_request:
     branches: [main, dev]
     paths:
@@ -21,6 +23,8 @@ on:
       - "package.json"
       - "package-lock.json"
       - "firebase.json"
+      - ".github/workflows/firestore-rules-test.yml"
+      - ".github/workflows/firebase-hosting-deploy.yml"
 
 jobs:
   test-rules:
