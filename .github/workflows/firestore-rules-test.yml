@@ -1,21 +1,29 @@
-name: Firestore Security Rules Test
+name: Firebase Security and Functions Tests
 
 on:
   push:
     branches: [main, develop]
     paths:
       - "security_rules/firestore/**"
+      - "security_rules/storage/**"
       - "tests/**"
+      - "functions/**"
       - "package.json"
+      - "package-lock.json"
+      - "firebase.json"
   pull_request:
     branches: [main]
     paths:
       - "security_rules/firestore/**"
+      - "security_rules/storage/**"
       - "tests/**"
+      - "functions/**"
       - "package.json"
+      - "package-lock.json"
+      - "firebase.json"
 
 jobs:
-  test-firestore-rules:
+  test-rules:
     runs-on: ubuntu-latest
 
     strategy:
@@ -57,26 +65,29 @@ jobs:
       - name: Install Firebase Emulators
         run: |
           firebase setup:emulators:firestore
+          firebase setup:emulators:storage
           # エミュレーターのバイナリが正しくダウンロードされたか確認
-          firebase emulators:exec --only firestore "echo 'Emulator test successful'" || echo "Emulator setup completed"
+          firebase emulators:exec --only firestore,storage "echo 'Emulator test successful'" || echo "Emulator setup completed"
 
-      - name: Run Firestore Rules Tests
+      - name: Run Firestore and Storage Rules Tests
         run: |
           # IPv6を無効にしてエミュレーターを起動
           export FIRESTORE_EMULATOR_HOST=127.0.0.1:8080
+          export FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1:9199
           # CI専用のテストスクリプトを実行
           npm run emulator:test:ci
         env:
           CI: true
           # IPv6を無効化
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
+          FIREBASE_STORAGE_EMULATOR_HOST: 127.0.0.1:9199
 
       - name: Upload test coverage
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage/lcov.info
-          flags: firestore-rules
-          name: firestore-rules-coverage
+          flags: firebase-rules
+          name: firebase-rules-coverage
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -106,16 +117,50 @@ jobs:
                   issue_number: context.issue.number,
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  body: `## 🧪 Firestore Security Rules テスト結果\n\n${summary}`
+                  body: `## 🧪 Firebase Security Rules テスト結果\n\n${summary}`
                 });
               }
             } catch (error) {
               console.log('テスト結果のコメント投稿に失敗しました:', error);
             }
 
+  test-functions:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: functions
+
+      - name: Lint Functions
+        run: npm run lint
+        working-directory: functions
+
+      - name: Build Functions
+        run: npm run build
+        working-directory: functions
+
+      - name: Test Functions
+        run: npm test
+        working-directory: functions
+
   security-check:
     runs-on: ubuntu-latest
-    needs: test-firestore-rules
+    needs: [test-rules, test-functions]
 
     steps:
       - name: Checkout repository
@@ -190,7 +235,7 @@ jobs:
 
   deploy-rules:
     runs-on: ubuntu-latest
-    needs: [test-firestore-rules, security-check]
+    needs: [test-rules, test-functions, security-check]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
