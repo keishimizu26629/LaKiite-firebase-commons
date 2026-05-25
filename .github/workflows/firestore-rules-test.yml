@@ -2,7 +2,7 @@ name: Firebase Security and Functions Tests
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev]
     paths:
       - "security_rules/firestore/**"
       - "security_rules/storage/**"
@@ -12,7 +12,7 @@ on:
       - "package-lock.json"
       - "firebase.json"
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - "security_rules/firestore/**"
       - "security_rules/storage/**"
