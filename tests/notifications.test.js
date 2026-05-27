@@ -287,6 +287,34 @@ describe('Notifications Collection Security Rules', () => {
       );
     });
 
+    test('受信者は友達申請通知を承認できる', async () => {
+      const mockData = {
+        'notifications/notif1': {
+          type: 'friend',
+          sendUserId: 'user1',
+          receiveUserId: 'user2',
+          status: 'pending',
+          createdAt: new Date(),
+          isRead: false,
+          rejectionCount: 0
+        }
+      };
+
+      const context = await setupTestEnvironment(
+        { uid: 'user2' },
+        mockData
+      );
+
+      const db = context.firestore();
+      await expectSuccess(
+        db.doc('notifications/notif1').update({
+          status: 'accepted',
+          isRead: true,
+          updatedAt: new Date()
+        })
+      );
+    });
+
     test('受信者は友達申請通知を期限切れとして既読にできる', async () => {
       const mockData = {
         'notifications/notif1': {
