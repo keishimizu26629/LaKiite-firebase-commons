@@ -1,5 +1,5 @@
-import { onDocumentUpdated } from "firebase-functions/v2/firestore";
-import { updateSchedulesVisibility } from "./utils";
+import { onDocumentDeleted, onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { removeDeletedListFromSchedules, updateSchedulesVisibility } from "./utils";
 
 /**
  * リストのメンバーが変更された時に実行されるトリガー
@@ -44,6 +44,24 @@ export const onListMemberUpdate = onDocumentUpdated({
     console.log(`Successfully updated schedules visibility for list ${listId}`);
   } catch (error) {
     console.error(`Error updating schedules visibility for list ${listId}:`, error);
+    throw error;
+  }
+});
+
+/**
+ * リストが削除された時に、そのリスト経由の予定公開を解除するトリガー
+ */
+export const onListDeleted = onDocumentDeleted({
+  document: "lists/{listId}",
+  region: "asia-northeast1"
+}, async (event) => {
+  const listId = event.params.listId;
+
+  try {
+    await removeDeletedListFromSchedules(listId);
+    console.log(`Successfully removed deleted list ${listId} from schedules`);
+  } catch (error) {
+    console.error(`Error removing deleted list ${listId} from schedules:`, error);
     throw error;
   }
 });
