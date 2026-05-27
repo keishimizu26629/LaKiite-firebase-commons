@@ -128,6 +128,52 @@ describe('Schedules Collection Security Rules', () => {
       await expectSuccess(db.doc('schedules/newSchedule').set(scheduleData));
     });
 
+    test('認証済みユーザーは終日スケジュールを作成できる', async () => {
+      const context = await setupTestEnvironment({ uid: 'user1' });
+      const db = context.firestore();
+
+      const scheduleData = {
+        title: 'All Day Schedule',
+        description: 'Time undecided',
+        startDateTime: new Date('2026-06-01T00:00:00.000Z'),
+        endDateTime: new Date('2026-06-01T23:59:59.999Z'),
+        isAllDay: true,
+        ownerId: 'user1',
+        sharedLists: [],
+        visibleTo: ['user1'],
+        ownerDisplayName: 'Test User',
+        reactionCount: 0,
+        commentCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      await expectSuccess(db.doc('schedules/allDaySchedule').set(scheduleData));
+    });
+
+    test('isAllDayがboolでないスケジュールは作成できない', async () => {
+      const context = await setupTestEnvironment({ uid: 'user1' });
+      const db = context.firestore();
+
+      const invalidScheduleData = {
+        title: 'Invalid All Day Schedule',
+        description: 'Invalid isAllDay',
+        startDateTime: new Date(),
+        endDateTime: new Date(),
+        isAllDay: 'true',
+        ownerId: 'user1',
+        sharedLists: [],
+        visibleTo: ['user1'],
+        ownerDisplayName: 'Test User',
+        reactionCount: 0,
+        commentCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      await expectFailure(db.doc('schedules/invalidAllDaySchedule').set(invalidScheduleData));
+    });
+
     test('他人のownerIdでスケジュールを作成できない', async () => {
       const context = await setupTestEnvironment({ uid: 'user1' });
       const db = context.firestore();
