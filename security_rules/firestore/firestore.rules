@@ -80,6 +80,12 @@ service cloud.firestore {
       );
     }
 
+    function hasOptionalStringOrNull(data, field) {
+      return !data.keys().hasAny([field])
+        || data[field] == null
+        || data[field] is string;
+    }
+
     // usersコレクションのルール
     match /users/{userId} {
       // 公開情報の読み取りと検索クエリを許可
@@ -263,12 +269,25 @@ service cloud.firestore {
       // reactionsサブコレクションのルール
       match /reactions/{reactionId} {
         // 読み取り: スケジュールにアクセス可能なユーザーのみ
-        allow read: if request.auth != null;
+        allow read: if request.auth != null
+          && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data);
 
         // 作成・更新: スケジュールにアクセス可能なユーザーのみ、かつreactionIdは自分のユーザーIDと一致
         allow create, update: if request.auth != null
+          && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data)
           && reactionId == request.auth.uid
-          && request.resource.data.userId == request.auth.uid;
+          && request.resource.data.keys().hasOnly([
+            'userId',
+            'type',
+            'createdAt',
+            'userDisplayName',
+            'userPhotoUrl'
+          ])
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.type in ['going', 'thinking']
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.userDisplayName is string
+          && hasOptionalStringOrNull(request.resource.data, 'userPhotoUrl');
 
         // 削除: 自分のリアクションのみ
         allow delete: if request.auth != null && reactionId == request.auth.uid;
@@ -281,12 +300,26 @@ service cloud.firestore {
 
         // 作成: 認証済みユーザーであれば作成可能
         allow create: if request.auth != null
+          && canAccessSchedule(get(/databases/$(database)/documents/schedules/$(scheduleId)).data)
+          && request.resource.data.keys().hasOnly([
+            'userId',
+            'content',
+            'createdAt',
+            'updatedAt',
+            'isEdited',
+            'userDisplayName',
+            'userPhotoUrl'
+          ])
           // userId は自分自身でなければならない
           && request.resource.data.userId == request.auth.uid
           // 必須フィールドの型チェック
           && request.resource.data.content is string
           && request.resource.data.createdAt is timestamp
-          && request.resource.data.updatedAt is timestamp;
+          && request.resource.data.updatedAt is timestamp
+          && request.resource.data.isEdited is bool
+          && request.resource.data.isEdited == false
+          && request.resource.data.userDisplayName is string
+          && hasOptionalStringOrNull(request.resource.data, 'userPhotoUrl');
 
         // 更新: 自分のコメントのみ
         allow update: if request.auth != null

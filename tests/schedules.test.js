@@ -267,6 +267,7 @@ describe('Schedules Collection Security Rules', () => {
           title: 'Test Schedule',
           ownerId: 'user1',
           visibleTo: ['user2'],
+          sharedLists: [],
           reactionCount: 0,
           commentCount: 0
         }
@@ -281,8 +282,39 @@ describe('Schedules Collection Security Rules', () => {
       await expectSuccess(
         db.doc('schedules/schedule1/reactions/user2').set({
           userId: 'user2',
+          type: 'going',
+          createdAt: new Date(),
+          userDisplayName: 'Test User 2',
+          userPhotoUrl: null
+        })
+      );
+    });
+
+    test('不正なリアクション種別では作成できない', async () => {
+      const mockData = {
+        'schedules/schedule1': {
+          title: 'Test Schedule',
+          ownerId: 'user1',
+          visibleTo: ['user2'],
+          sharedLists: [],
+          reactionCount: 0,
+          commentCount: 0
+        }
+      };
+
+      const context = await setupTestEnvironment(
+        { uid: 'user2' },
+        mockData
+      );
+
+      const db = context.firestore();
+      await expectFailure(
+        db.doc('schedules/schedule1/reactions/user2').set({
+          userId: 'user2',
           type: 'like',
-          createdAt: new Date()
+          createdAt: new Date(),
+          userDisplayName: 'Test User 2',
+          userPhotoUrl: null
         })
       );
     });
@@ -293,6 +325,7 @@ describe('Schedules Collection Security Rules', () => {
           title: 'Test Schedule',
           ownerId: 'user1',
           visibleTo: ['user2'],
+          sharedLists: [],
           reactionCount: 0,
           commentCount: 0
         }
@@ -307,8 +340,39 @@ describe('Schedules Collection Security Rules', () => {
       await expectFailure(
         db.doc('schedules/schedule1/reactions/user3').set({
           userId: 'user3', // 他人のID
-          type: 'like',
-          createdAt: new Date()
+          type: 'going',
+          createdAt: new Date(),
+          userDisplayName: 'Test User 3',
+          userPhotoUrl: null
+        })
+      );
+    });
+
+    test('予定にアクセスできないユーザーはリアクションを作成できない', async () => {
+      const mockData = {
+        'schedules/schedule1': {
+          title: 'Test Schedule',
+          ownerId: 'user1',
+          visibleTo: ['user2'],
+          sharedLists: [],
+          reactionCount: 0,
+          commentCount: 0
+        }
+      };
+
+      const context = await setupTestEnvironment(
+        { uid: 'user3' },
+        mockData
+      );
+
+      const db = context.firestore();
+      await expectFailure(
+        db.doc('schedules/schedule1/reactions/user3').set({
+          userId: 'user3',
+          type: 'thinking',
+          createdAt: new Date(),
+          userDisplayName: 'Test User 3',
+          userPhotoUrl: null
         })
       );
     });
@@ -321,6 +385,7 @@ describe('Schedules Collection Security Rules', () => {
           title: 'Test Schedule',
           ownerId: 'user1',
           visibleTo: ['user2'],
+          sharedLists: [],
           reactionCount: 0,
           commentCount: 0
         }
@@ -337,7 +402,10 @@ describe('Schedules Collection Security Rules', () => {
           userId: 'user2',
           content: 'Great schedule!',
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
+          isEdited: false,
+          userDisplayName: 'Test User 2',
+          userPhotoUrl: null
         })
       );
     });
@@ -348,6 +416,7 @@ describe('Schedules Collection Security Rules', () => {
           title: 'Test Schedule',
           ownerId: 'user1',
           visibleTo: ['user2'],
+          sharedLists: [],
           reactionCount: 0,
           commentCount: 0
         },
@@ -381,6 +450,7 @@ describe('Schedules Collection Security Rules', () => {
           title: 'Test Schedule',
           ownerId: 'user1',
           visibleTo: ['user2', 'user3'],
+          sharedLists: [],
           reactionCount: 0,
           commentCount: 0
         },
