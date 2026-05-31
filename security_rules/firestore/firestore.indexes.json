@@ -52,6 +52,24 @@
         },
         {
           "fieldPath": "startDateTime",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "endDateTime",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "schedules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "visibleTo",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "startDateTime",
           "order": "DESCENDING"
         }
       ]
