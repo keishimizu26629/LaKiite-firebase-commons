@@ -1,7 +1,11 @@
 import * as admin from "firebase-admin";
 
 /**
- * リストメンバー変更時に関連する予定の可視性を更新する
+ * リストメンバー変更時に関連する予定の可視性を更新する。
+ *
+ * 差分で visibleTo を足し引きすると、同じユーザーが複数リストから共有
+ * されている場合に誤って閲覧権限を消してしまう。対象予定ごとに
+ * sharedLists の全リストを読み直し、毎回 union を再計算する。
  * @param listId 変更されたリストのID
  * @param addedMembers 追加されたメンバーのIDリスト
  * @param removedMembers 削除されたメンバーのIDリスト
@@ -15,16 +19,82 @@ export async function updateSchedulesVisibility(
   console.log(`Added members: ${addedMembers.join(", ")}`);
   console.log(`Removed members: ${removedMembers.join(", ")}`);
 
-  // 変更がない場合は早期リターン
   if (addedMembers.length === 0 && removedMembers.length === 0) {
     console.log("No member changes detected, skipping update");
     return;
   }
 
+  await recomputeSchedulesVisibilityForList(listId);
+}
+
+/**
+ * リスト削除時に、そのリストを共有元にしている予定から共有を外す。
+ * @param listId 削除されたリストのID
+ */
+export async function removeDeletedListFromSchedules(
+  listId: string
+): Promise<void> {
+  console.log(`Removing deleted list ${listId} from schedules`);
+  await recomputeSchedulesVisibilityForList(listId, { removeListId: listId });
+}
+
+/**
+ * 全予定の visibleTo を再計算する。既存データの backfill 用。
+ */
+export async function backfillAllScheduleVisibility(): Promise<{
+  scanned: number;
+  updated: number;
+}> {
+  const db = admin.firestore();
+  const schedulesSnapshot = await db.collection("schedules").get();
+  let batch = db.batch();
+  let batchCount = 0;
+  let updated = 0;
+
+  for (const scheduleDoc of schedulesSnapshot.docs) {
+    const scheduleData = scheduleDoc.data();
+    const sharedLists = asStringArray(scheduleData.sharedLists);
+
+    if (sharedLists.length === 0) {
+      continue;
+    }
+
+    const nextVisibleTo = await calculateVisibleTo(scheduleData);
+    const currentVisibleTo = asStringArray(scheduleData.visibleTo);
+
+    if (!arraysEqual([...nextVisibleTo].sort(), [...currentVisibleTo].sort())) {
+      batch.update(scheduleDoc.ref, {
+        visibleTo: nextVisibleTo,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      batchCount++;
+      updated++;
+    }
+
+    if (batchCount >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      batchCount = 0;
+    }
+  }
+
+  if (batchCount > 0) {
+    await batch.commit();
+  }
+
+  return {
+    scanned: schedulesSnapshot.size,
+    updated,
+  };
+}
+
+async function recomputeSchedulesVisibilityForList(
+  listId: string,
+  options: { removeListId?: string } = {}
+): Promise<void> {
   const db = admin.firestore();
 
   try {
-    // このリストを使用している全ての予定を取得
     const schedulesSnapshot = await db
       .collection("schedules")
       .where("sharedLists", "array-contains", listId)
@@ -37,54 +107,48 @@ export async function updateSchedulesVisibility(
       return;
     }
 
-    const batch = db.batch();
+    let batch = db.batch();
     let batchCount = 0;
     let updatedCount = 0;
 
     for (const scheduleDoc of schedulesSnapshot.docs) {
       const scheduleData = scheduleDoc.data();
-      const currentVisibleToArray = (scheduleData.visibleTo || []) as string[];
-      const currentVisibleTo = new Set<string>(currentVisibleToArray);
-      const originalSize = currentVisibleTo.size;
+      const currentVisibleToArray = asStringArray(scheduleData.visibleTo);
+      const nextScheduleData = removeSharedListFromScheduleData(
+        scheduleData,
+        options.removeListId
+      );
+      const newVisibleTo = await calculateVisibleTo(nextScheduleData);
+      const updateData: admin.firestore.UpdateData<admin.firestore.DocumentData> = {
+        visibleTo: newVisibleTo,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
 
-      // 追加されたメンバーをvisibleToに追加
-      addedMembers.forEach(memberId => {
-        currentVisibleTo.add(memberId);
-      });
+      if (options.removeListId) {
+        updateData.sharedLists = admin.firestore.FieldValue.arrayRemove(
+          options.removeListId
+        );
+      }
 
-      // 削除されたメンバーをvisibleToから削除（オーナーは除く）
-      removedMembers.forEach(memberId => {
-        if (memberId !== scheduleData.ownerId) {
-          currentVisibleTo.delete(memberId);
-        }
-      });
-
-      // 変更があった場合のみ更新
-      const newVisibleTo = Array.from(currentVisibleTo);
-
-      if (currentVisibleTo.size !== originalSize ||
-          !arraysEqual(newVisibleTo.sort(), currentVisibleToArray.sort())) {
-
-        batch.update(scheduleDoc.ref, {
-          visibleTo: newVisibleTo,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-
+      if (
+        !arraysEqual([...newVisibleTo].sort(), [...currentVisibleToArray].sort()) ||
+        options.removeListId
+      ) {
+        batch.update(scheduleDoc.ref, updateData);
         batchCount++;
         updatedCount++;
 
         console.log(`Scheduled update for schedule ${scheduleDoc.id}: ${currentVisibleToArray.length} -> ${newVisibleTo.length} members`);
 
-        // Firestoreのバッチ制限（500件）に達したら実行
-        if (batchCount >= 500) {
+        if (batchCount >= 450) {
           await batch.commit();
           console.log(`Committed batch of ${batchCount} updates`);
+          batch = db.batch();
           batchCount = 0;
         }
       }
     }
 
-    // 残りのバッチを実行
     if (batchCount > 0) {
       await batch.commit();
       console.log(`Committed final batch of ${batchCount} updates`);
@@ -95,6 +159,60 @@ export async function updateSchedulesVisibility(
     console.error(`Error updating schedules visibility for list ${listId}:`, error);
     throw error;
   }
+}
+
+async function calculateVisibleTo(
+  scheduleData: admin.firestore.DocumentData
+): Promise<string[]> {
+  const db = admin.firestore();
+  const ownerId = typeof scheduleData.ownerId === "string" ? scheduleData.ownerId : "";
+  const sharedLists = asStringArray(scheduleData.sharedLists);
+  const visibleTo = new Set<string>();
+
+  if (ownerId) {
+    visibleTo.add(ownerId);
+  }
+
+  for (const sharedListId of sharedLists) {
+    const listDoc = await db.collection("lists").doc(sharedListId).get();
+    if (!listDoc.exists) {
+      console.warn(`Shared list not found: ${sharedListId}`);
+      continue;
+    }
+
+    const listData = listDoc.data() || {};
+    for (const memberId of asStringArray(listData.memberIds)) {
+      visibleTo.add(memberId);
+    }
+  }
+
+  return Array.from(visibleTo);
+}
+
+function removeSharedListFromScheduleData(
+  scheduleData: admin.firestore.DocumentData,
+  listId?: string
+): admin.firestore.DocumentData {
+  if (!listId) {
+    return scheduleData;
+  }
+
+  return {
+    ...scheduleData,
+    sharedLists: asStringArray(scheduleData.sharedLists).filter(
+      (sharedListId) => sharedListId !== listId
+    ),
+  };
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => {
+    return typeof item === "string" && item.length > 0;
+  });
 }
 
 /**

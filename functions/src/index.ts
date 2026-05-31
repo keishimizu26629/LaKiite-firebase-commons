@@ -9,6 +9,7 @@ export * from "./handlers/group/triggers";
 
 // リスト関連のトリガーをエクスポート
 export * from "./handlers/list/triggers";
+export * from "./handlers/list/manual-sync";
 
 // 通知関連のトリガーをエクスポート
 export * from "./handlers/notification/triggers";
