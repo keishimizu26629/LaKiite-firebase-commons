@@ -235,7 +235,7 @@ jobs:
             echo "✅ セキュリティルールの基本的なチェックが完了しました"
           fi
 
-  deploy-rules:
+  deploy-firebase:
     runs-on: ubuntu-latest
     needs: [test-rules, test-functions, security-check]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -253,6 +253,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Functions dependencies
+        run: npm ci
+        working-directory: functions
+
       - name: Setup Firebase CLI
         run: npm install -g firebase-tools
 
@@ -261,7 +265,7 @@ jobs:
         run: |
           if [ -z "$FIREBASE_TOKEN" ] || [ -z "$FIREBASE_PROJECT_ID" ]; then
             echo "should_deploy=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Firebase deployment secrets are not configured. Skipping Firestore Rules deployment."
+            echo "⚠️ Firebase deployment secrets are not configured. Skipping Firebase deployment."
           else
             echo "should_deploy=true" >> "$GITHUB_OUTPUT"
           fi
@@ -269,16 +273,16 @@ jobs:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
 
-      - name: Deploy Firestore Rules
+      - name: Deploy Firebase resources
         if: steps.firebase-secrets.outputs.should_deploy == 'true'
         run: |
-          echo "🚀 Firestoreセキュリティルールをデプロイ中..."
-          firebase deploy --only firestore:rules --token "${{ secrets.FIREBASE_TOKEN }}" --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+          echo "🚀 Firebaseセキュリティルール、Functions、Indexesをデプロイ中..."
+          firebase deploy --only firestore:rules,storage,firestore:indexes,functions --token "${{ secrets.FIREBASE_TOKEN }}" --project "${{ secrets.FIREBASE_PROJECT_ID }}"
           echo "✅ デプロイが完了しました"
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
 
-      - name: Skip Firestore Rules deployment
+      - name: Skip Firebase deployment
         if: steps.firebase-secrets.outputs.should_deploy == 'false'
-        run: echo "Firestore Rules deployment skipped because Firebase deployment secrets are not configured."
+        run: echo "Firebase deployment skipped because Firebase deployment secrets are not configured."
