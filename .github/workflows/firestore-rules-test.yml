@@ -260,29 +260,31 @@ jobs:
       - name: Setup Firebase CLI
         run: npm install -g firebase-tools
 
-      - name: Check Firebase deployment secrets
-        id: firebase-secrets
+      - name: Validate Firebase deployment configuration
         run: |
-          if [ -z "$FIREBASE_TOKEN" ] || [ -z "$FIREBASE_PROJECT_ID" ]; then
-            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Firebase deployment secrets are not configured. Skipping Firebase deployment."
-          else
-            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "❌ FIREBASE_TOKEN secret is not configured."
+            exit 1
           fi
+          if [ -z "$FIREBASE_PROJECT_ID" ]; then
+            echo "❌ FIREBASE_PROJECT_ID variable is not configured."
+            exit 1
+          fi
+          if [ "$FIREBASE_PROJECT_ID" != "$EXPECTED_FIREBASE_PROJECT_ID" ]; then
+            echo "❌ FIREBASE_PROJECT_ID must be '$EXPECTED_FIREBASE_PROJECT_ID' but was '$FIREBASE_PROJECT_ID'."
+            exit 1
+          fi
+          echo "✅ Firebase deployment configuration validated for project '$FIREBASE_PROJECT_ID'."
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          EXPECTED_FIREBASE_PROJECT_ID: lakiite-flutter-app-prod
 
       - name: Deploy Firebase resources
-        if: steps.firebase-secrets.outputs.should_deploy == 'true'
         run: |
           echo "🚀 Firebaseセキュリティルール、Functions、Indexesをデプロイ中..."
-          firebase deploy --only firestore:rules,storage,firestore:indexes,functions --token "${{ secrets.FIREBASE_TOKEN }}" --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+          firebase deploy --only firestore:rules,storage,firestore:indexes,functions --token "$FIREBASE_TOKEN" --project "$FIREBASE_PROJECT_ID"
           echo "✅ デプロイが完了しました"
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-
-      - name: Skip Firebase deployment
-        if: steps.firebase-secrets.outputs.should_deploy == 'false'
-        run: echo "Firebase deployment skipped because Firebase deployment secrets are not configured."
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
