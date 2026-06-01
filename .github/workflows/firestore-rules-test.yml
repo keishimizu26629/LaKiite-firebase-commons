@@ -260,29 +260,40 @@ jobs:
       - name: Setup Firebase CLI
         run: npm install -g firebase-tools
 
-      - name: Check Firebase deployment secrets
-        id: firebase-secrets
+      - name: Validate Firebase deployment configuration
         run: |
-          if [ -z "$FIREBASE_TOKEN" ] || [ -z "$FIREBASE_PROJECT_ID" ]; then
-            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Firebase deployment secrets are not configured. Skipping Firebase deployment."
-          else
-            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64" ]; then
+            echo "❌ PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64 secret is not configured."
+            exit 1
           fi
+          if [ -z "$PROD_FIREBASE_PROJECT_ID" ]; then
+            echo "❌ PROD_FIREBASE_PROJECT_ID variable is not configured."
+            exit 1
+          fi
+          if [ "$PROD_FIREBASE_PROJECT_ID" != "$EXPECTED_FIREBASE_PROJECT_ID" ]; then
+            echo "❌ PROD_FIREBASE_PROJECT_ID must be '$EXPECTED_FIREBASE_PROJECT_ID' but was '$PROD_FIREBASE_PROJECT_ID'."
+            exit 1
+          fi
+
+          SERVICE_ACCOUNT_KEY_FILE="$RUNNER_TEMP/prod_firebase_service_account_key.json"
+          printf '%s' "$PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64" | base64 --decode > "$SERVICE_ACCOUNT_KEY_FILE"
+          SERVICE_ACCOUNT_PROJECT_ID=$(node -e "const fs = require('fs'); const key = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); console.log(key.project_id || '');" "$SERVICE_ACCOUNT_KEY_FILE")
+          if [ "$SERVICE_ACCOUNT_PROJECT_ID" != "$EXPECTED_FIREBASE_PROJECT_ID" ]; then
+            echo "❌ Service account project_id must be '$EXPECTED_FIREBASE_PROJECT_ID' but was '$SERVICE_ACCOUNT_PROJECT_ID'."
+            exit 1
+          fi
+
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$SERVICE_ACCOUNT_KEY_FILE" >> "$GITHUB_ENV"
+          echo "✅ Firebase deployment configuration validated for project '$PROD_FIREBASE_PROJECT_ID'."
         env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64: ${{ secrets.PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64 }}
+          PROD_FIREBASE_PROJECT_ID: ${{ vars.PROD_FIREBASE_PROJECT_ID }}
+          EXPECTED_FIREBASE_PROJECT_ID: lakiite-flutter-app-prod
 
       - name: Deploy Firebase resources
-        if: steps.firebase-secrets.outputs.should_deploy == 'true'
         run: |
           echo "🚀 Firebaseセキュリティルール、Functions、Indexesをデプロイ中..."
-          firebase deploy --only firestore:rules,storage,firestore:indexes,functions --token "${{ secrets.FIREBASE_TOKEN }}" --project "${{ secrets.FIREBASE_PROJECT_ID }}"
+          firebase deploy --only firestore:rules,storage,firestore:indexes,functions --project "$PROD_FIREBASE_PROJECT_ID"
           echo "✅ デプロイが完了しました"
         env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-
-      - name: Skip Firebase deployment
-        if: steps.firebase-secrets.outputs.should_deploy == 'false'
-        run: echo "Firebase deployment skipped because Firebase deployment secrets are not configured."
+          PROD_FIREBASE_PROJECT_ID: ${{ vars.PROD_FIREBASE_PROJECT_ID }}
