@@ -262,29 +262,38 @@ jobs:
 
       - name: Validate Firebase deployment configuration
         run: |
-          if [ -z "$FIREBASE_TOKEN" ]; then
-            echo "❌ FIREBASE_TOKEN secret is not configured."
+          if [ -z "$PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64" ]; then
+            echo "❌ PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64 secret is not configured."
             exit 1
           fi
-          if [ -z "$FIREBASE_PROJECT_ID" ]; then
-            echo "❌ FIREBASE_PROJECT_ID variable is not configured."
+          if [ -z "$PROD_FIREBASE_PROJECT_ID" ]; then
+            echo "❌ PROD_FIREBASE_PROJECT_ID variable is not configured."
             exit 1
           fi
-          if [ "$FIREBASE_PROJECT_ID" != "$EXPECTED_FIREBASE_PROJECT_ID" ]; then
-            echo "❌ FIREBASE_PROJECT_ID must be '$EXPECTED_FIREBASE_PROJECT_ID' but was '$FIREBASE_PROJECT_ID'."
+          if [ "$PROD_FIREBASE_PROJECT_ID" != "$EXPECTED_FIREBASE_PROJECT_ID" ]; then
+            echo "❌ PROD_FIREBASE_PROJECT_ID must be '$EXPECTED_FIREBASE_PROJECT_ID' but was '$PROD_FIREBASE_PROJECT_ID'."
             exit 1
           fi
-          echo "✅ Firebase deployment configuration validated for project '$FIREBASE_PROJECT_ID'."
+
+          SERVICE_ACCOUNT_KEY_FILE="$RUNNER_TEMP/prod_firebase_service_account_key.json"
+          printf '%s' "$PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64" | base64 --decode > "$SERVICE_ACCOUNT_KEY_FILE"
+          SERVICE_ACCOUNT_PROJECT_ID=$(node -e "const fs = require('fs'); const key = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); console.log(key.project_id || '');" "$SERVICE_ACCOUNT_KEY_FILE")
+          if [ "$SERVICE_ACCOUNT_PROJECT_ID" != "$EXPECTED_FIREBASE_PROJECT_ID" ]; then
+            echo "❌ Service account project_id must be '$EXPECTED_FIREBASE_PROJECT_ID' but was '$SERVICE_ACCOUNT_PROJECT_ID'."
+            exit 1
+          fi
+
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$SERVICE_ACCOUNT_KEY_FILE" >> "$GITHUB_ENV"
+          echo "✅ Firebase deployment configuration validated for project '$PROD_FIREBASE_PROJECT_ID'."
         env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64: ${{ secrets.PROD_FIREBASE_SERVICE_ACCOUNT_KEY_BASE64 }}
+          PROD_FIREBASE_PROJECT_ID: ${{ vars.PROD_FIREBASE_PROJECT_ID }}
           EXPECTED_FIREBASE_PROJECT_ID: lakiite-flutter-app-prod
 
       - name: Deploy Firebase resources
         run: |
           echo "🚀 Firebaseセキュリティルール、Functions、Indexesをデプロイ中..."
-          firebase deploy --only firestore:rules,storage,firestore:indexes,functions --token "$FIREBASE_TOKEN" --project "$FIREBASE_PROJECT_ID"
+          firebase deploy --only firestore:rules,storage,firestore:indexes,functions --project "$PROD_FIREBASE_PROJECT_ID"
           echo "✅ デプロイが完了しました"
         env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          PROD_FIREBASE_PROJECT_ID: ${{ vars.PROD_FIREBASE_PROJECT_ID }}
